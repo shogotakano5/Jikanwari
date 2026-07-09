@@ -150,6 +150,19 @@ export default function SettingsPage() {
           />
         </label>
 
+        <label className="flex flex-col gap-1 text-sm">
+          履修コース（任意）
+          <input
+            placeholder="例: 標準コース、高度専門コース等"
+            value={form.selectedCourse ?? ""}
+            onChange={(e) => setForm({ ...form, selectedCourse: e.target.value })}
+            className="rounded-lg border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+          />
+          <p className="text-xs text-zinc-500">
+            履修ガイドに複数のコース・トラックがある場合、ここで選択すると卒業判定に反映されます（将来実装予定）。
+          </p>
+        </label>
+
         {/* 選択中の入学年度・学部・学科に対応する履修ガイドのプレビュー */}
         <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs dark:border-blue-900 dark:bg-blue-950/40">
           {previewRequirementSet ? (

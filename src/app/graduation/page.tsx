@@ -36,6 +36,7 @@ export default function GraduationPage() {
       <p className="mt-1 text-sm text-zinc-500">
         {settings.entryYear}年度入学 {requirementSet.faculty}
         {requirementSet.department}（{requirementSet.note}）
+        {settings.selectedCourse && <><br />履修コース: {settings.selectedCourse}</>}
       </p>
 
       <div className="mt-4 flex items-center gap-4 rounded-xl bg-white p-4 shadow-sm dark:bg-zinc-900">

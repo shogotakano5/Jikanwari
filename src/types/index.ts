@@ -117,6 +117,7 @@ export interface Settings {
   theme: "system" | "light" | "dark";
   lastSyllabusSyncNote?: string;
   loadedSyllabusYears?: number[]; // Track which years' syllabus data have been imported
+  selectedCourse?: string; // Selected course/track within the department (e.g., "標準履修コース", "高度専門コース", etc.)
 }
 
 export interface FavoriteEntry {
