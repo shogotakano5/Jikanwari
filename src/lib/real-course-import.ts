@@ -143,5 +143,30 @@ export async function fetchRealCoursesByYears(years: number[]): Promise<Course[]
     }
   }
 
+  // Add placeholder seminar courses for grades 1-4 to help students plan ahead
+  for (const grade of [1, 2, 3, 4]) {
+    const placeholderId = `seminar-placeholder-grade${grade}`;
+    if (!uniqueIds.has(placeholderId)) {
+      uniqueIds.add(placeholderId);
+      courses.push({
+        id: placeholderId,
+        name: `ゼミナール（${grade}年）`,
+        teacher: "未定",
+        faculty: "経済学部",
+        department: "経営経済学科",
+        credits: 4,
+        targetYears: [grade],
+        semester: "通年",
+        day: "火",
+        period: grade === 3 ? 4 : grade === 4 ? 5 : 6,
+        overview: `${grade}年次のゼミナール履修計画用プレースホルダー。実際のゼミナール担当教員の科目に置き換えてください。`,
+        evaluation: [],
+        keywords: [],
+        source: "scraped",
+        cachedAt: Date.now(),
+      });
+    }
+  }
+
   return courses;
 }
