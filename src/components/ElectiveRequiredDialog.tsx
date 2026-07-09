@@ -110,7 +110,7 @@ export default function ElectiveRequiredDialog({ onClose }: Props) {
                   ) : (
                     candidates.map((course) => {
                       const status = statusByCourseId.get(course.id);
-                      const checked = status !== undefined;
+                      const isPlanned = status === "planned";
                       return (
                         <label
                           key={course.id}
@@ -118,9 +118,9 @@ export default function ElectiveRequiredDialog({ onClose }: Props) {
                         >
                           <input
                             type="checkbox"
-                            checked={checked}
+                            checked={isPlanned}
                             onChange={() => {
-                              if (checked) {
+                              if (isPlanned) {
                                 clearCourseStatus(course.id);
                               } else {
                                 setCourseStatus(course.id, "planned", settings.entryYear, course.credits);
