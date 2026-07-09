@@ -1,9 +1,11 @@
-import * as cheerio from "cheerio";
-import type { AnyNode } from "domhandler";
-import { unstable_cache } from "next/cache";
-import type { Course, EvaluationItem, Weekday } from "@/types";
-import { SCRAPER_CONFIG } from "./scraper-config";
+import type { Course, EvaluationItem, Period, Semester, SubjectGroup, Weekday } from "@/types";
 import { normalizeQuery } from "./search";
+import {
+  scrapeAllEconomicsCourses,
+  scrapeCampusCourseWithDetail,
+} from "./scraping/asahikawa-scraper";
+import { ASAHIKAWA_SCRAPER_CONFIG, type ScrapedCourse } from "./scraping/scraper-config";
+import { unstable_cache } from "next/cache";
 
 export interface ScrapeResult {
   courses: Course[];
@@ -17,21 +19,17 @@ export interface SyncResult {
   warning?: string;
 }
 
-interface SearchCondition {
-  query?: string;
-  grade?: number;
-  day?: number;
-}
-
 const DAY_MAP: Record<string, Weekday> = { 月: "月", 火: "火", 水: "水", 木: "木", 金: "金", 土: "土" };
 
-function parseDayPeriod(text: string): { day: Weekday; period: number } | null {
-  const m = text.match(/([月火水木金土])\s*(\d)/);
+function parseDayPeriod(text: string | undefined): { day: Weekday; period: number } | null {
+  if (!text) return null;
+  const m = text.match(/([月火水木金土])\s*曜?日?\s*[\s　]*(\d)\s*時限?/);
   if (!m) return null;
   return { day: DAY_MAP[m[1]], period: Number(m[2]) };
 }
 
-function parseEvaluation(text: string): EvaluationItem[] {
+function parseEvaluation(text: string | undefined): EvaluationItem[] {
+  if (!text) return [];
   const items: EvaluationItem[] = [];
   const re = /(試験|レポート|出席|小テスト|平常点|課題|発表)\s*(\d{1,3})\s*%/g;
   let m: RegExpExecArray | null;
@@ -41,140 +39,72 @@ function parseEvaluation(text: string): EvaluationItem[] {
   return items;
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SCRAPER_CONFIG.requestTimeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal, redirect: "follow" });
-  } finally {
-    clearTimeout(timer);
-  }
+function parseSemester(detail: Record<string, string> | undefined, rawText: string | undefined): Semester {
+  const source = detail?.["開講学期"] ?? detail?.["開講期・曜日・時限"] ?? rawText ?? "";
+  if (source.includes("通年")) return "通年";
+  if (source.includes("集中")) return "集中";
+  if (source.includes("前期")) return "前期";
+  if (source.includes("後期")) return "後期";
+  return "通年";
 }
 
-const COMMON_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (compatible; Jikanwari/1.0; +https://github.com/)",
-};
+function parseTargetYears(detail: Record<string, string> | undefined): number[] {
+  const text = detail?.["配当学年"];
+  if (!text) return [];
+  const matches = text.match(/[1-4]/g);
+  return matches ? Array.from(new Set(matches.map(Number))) : [];
+}
 
-/** Set-Cookie ヘッダ群を次のリクエスト用のCookieヘッダ文字列にまとめる */
-function collectCookies(res: Response): string {
-  // undici/Node18+ の Response は複数Set-Cookieを getSetCookie() で取得できる
-  const anyHeaders = res.headers as Headers & { getSetCookie?: () => string[] };
-  const setCookies = anyHeaders.getSetCookie?.() ?? [];
-  return setCookies.map((c) => c.split(";")[0]).join("; ");
+function nonEmpty(value: string | undefined): string | undefined {
+  return value && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function parseSubjectGroup(name: string): SubjectGroup | undefined {
+  if (name.startsWith("基幹科目群")) return "基幹科目";
+  if (name.startsWith("総合科目群")) return "総合科目";
+  return undefined;
 }
 
 /**
- * Strutsベースの教務システムを想定し、まず検索フォームページをGETして
- * セッションCookieとhidden input（CSRFトークン等）を収集する。
+ * src/lib/scraping/asahikawa-scraper.ts が返す ScrapedCourse（実サイトの検索結果・
+ * 詳細ページのtable行をほぼそのまま保持した形）を、アプリ内部のCourse型へ変換する。
+ * detail（詳細ページのth/td）が無い場合は、rawText（検索結果行のテキスト）から
+ * 曜日・時限・評価方法を可能な範囲で抽出する。
  */
-async function fetchSearchForm(): Promise<{ cookie: string; hiddenFields: Record<string, string> }> {
-  const formUrl = new URL(SCRAPER_CONFIG.searchPagePath, SCRAPER_CONFIG.baseUrl).toString();
-  const res = await fetchWithTimeout(formUrl, { headers: COMMON_HEADERS });
-  const cookie = collectCookies(res);
-  const html = await res.text();
-  const $ = cheerio.load(html);
-  const hiddenFields: Record<string, string> = {};
-  $(SCRAPER_CONFIG.hiddenFieldSelector).each((_, el) => {
-    const name = $(el).attr("name");
-    if (name) hiddenFields[name] = $(el).attr("value") ?? "";
-  });
-  return { cookie, hiddenFields };
-}
-
-function buildSearchBody(hiddenFields: Record<string, string>, condition: SearchCondition): URLSearchParams {
-  const body = new URLSearchParams(hiddenFields);
-  if (condition.query) {
-    for (const field of SCRAPER_CONFIG.subjectNameFieldCandidates) body.set(field, condition.query);
-  }
-  if (condition.grade) {
-    for (const field of SCRAPER_CONFIG.gradeFieldCandidates) body.set(field, String(condition.grade));
-  }
-  if (condition.day) {
-    for (const field of SCRAPER_CONFIG.dayFieldCandidates) body.set(field, String(condition.day));
-  }
-  for (const [k, v] of Object.entries(SCRAPER_CONFIG.submitActionFieldCandidates)) body.set(k, v);
-  return body;
-}
-
-function parseResultRows($: cheerio.CheerioAPI): cheerio.Cheerio<AnyNode> {
-  for (const selector of SCRAPER_CONFIG.resultRowSelectorCandidates) {
-    const candidate = $(selector);
-    if (candidate.length > 0) return candidate;
-  }
-  return $();
-}
-
-function rowToCourse($: cheerio.CheerioAPI, el: AnyNode): Course | null {
-  const row = $(el);
-  const name = row.find(SCRAPER_CONFIG.resultSelectors.name).first().text().trim();
-  if (!name) return null;
-  const teacher = row.find(SCRAPER_CONFIG.resultSelectors.teacher).first().text().trim();
-  const creditsText = row.find(SCRAPER_CONFIG.resultSelectors.credits).first().text().trim();
-  const rowText = row.text();
-  const dayPeriod = parseDayPeriod(rowText);
-  const href = row.find(SCRAPER_CONFIG.resultSelectors.name).first().attr(SCRAPER_CONFIG.resultSelectors.detailLinkAttr);
+function mapScrapedCourseToCourse(scraped: ScrapedCourse): Course {
+  const detail = scraped.detail;
+  const dayPeriod =
+    parseDayPeriod(detail?.["開講期・曜日・時限"]) ?? parseDayPeriod(scraped.rawText) ?? parseDayPeriod(`${scraped.day ?? ""}${scraped.period ?? ""}`);
+  const evaluationText = detail?.["評価方法・基準"] ?? scraped.rawText;
 
   return {
-    id: `scraped-${Buffer.from(name + teacher).toString("base64url").slice(0, 16)}`,
-    name,
-    teacher: teacher || "未設定",
+    id: scraped.id,
+    name: scraped.name,
+    teacher: scraped.teacher || detail?.["担当教員名"] || "未設定",
     faculty: "経済学部",
-    department: "経営経済学科",
-    credits: Number(creditsText.replace(/[^0-9]/g, "")) || 2,
-    targetYears: [1, 2, 3, 4],
-    semester: "前期",
-    day: dayPeriod?.day ?? "月",
-    period: (dayPeriod?.period as Course["period"]) ?? 1,
-    overview: "",
-    evaluation: parseEvaluation(rowText),
+    department: scraped.department || ASAHIKAWA_SCRAPER_CONFIG.campusWeb.departmentLabel,
+    credits: Number(scraped.credits ?? detail?.["単位"]) || 2,
+    targetYears: parseTargetYears(detail),
+    syllabusYear: scraped.year,
+    semester: parseSemester(detail, scraped.rawText),
+    day: dayPeriod?.day,
+    period: dayPeriod?.period as Period | undefined,
+    overview: detail?.["授業の概要"] ?? "",
+    goals: nonEmpty(detail?.["到達目標"]),
+    prerequisites: nonEmpty(detail?.["履修条件"]),
+    courseNumbering: nonEmpty(detail?.["科目ナンバリング"]),
+    syllabusPlan: nonEmpty(detail?.["授業計画"]),
+    evaluationNotes: nonEmpty(detail?.["評価方法・基準"]),
+    evaluation: parseEvaluation(evaluationText),
+    textbook: nonEmpty(detail?.["教科書"]),
+    references: nonEmpty(detail?.["参考書"]),
     keywords: [],
-    // categoryKeyは付けない: classifyCourse()が科目名から選択必修A〜E等を自動判定する
+    subjectGroup: parseSubjectGroup(scraped.name),
+    // categoryKeyは付けない: classifyCourse()が科目名から必修/選択必修A〜Eを自動判定する
     source: "scraped",
-    syllabusUrl: href ? new URL(href, SCRAPER_CONFIG.baseUrl).toString() : undefined,
+    syllabusUrl: scraped.syllabusUrl,
     cachedAt: Date.now(),
   };
-}
-
-/**
- * 大学のシラバス検索システムへライブアクセスを試みる。
- * 到達不能・構造不一致など何らかの理由で失敗した場合は必ず例外を投げる
- * （呼び出し側で「見つかりませんでした」として扱う）。
- */
-async function scrapeCondition(condition: SearchCondition): Promise<Course[]> {
-  const { cookie, hiddenFields } = await fetchSearchForm();
-  const body = buildSearchBody(hiddenFields, condition);
-
-  const searchUrl = new URL(SCRAPER_CONFIG.searchSubmitPath, SCRAPER_CONFIG.baseUrl).toString();
-  const res = await fetchWithTimeout(searchUrl, {
-    method: "POST",
-    headers: {
-      ...COMMON_HEADERS,
-      "Content-Type": "application/x-www-form-urlencoded",
-      ...(cookie ? { Cookie: cookie } : {}),
-    },
-    body: body.toString(),
-  });
-
-  if (!res.ok) {
-    throw new Error(`syllabus search returned HTTP ${res.status}`);
-  }
-  const html = await res.text();
-  const $ = cheerio.load(html);
-  const rows = parseResultRows($);
-  if (rows.length === 0) {
-    throw new Error("no result rows matched configured selectors — site structure may differ");
-  }
-
-  const courses: Course[] = [];
-  rows.each((_, el) => {
-    const course = rowToCourse($, el);
-    if (course) courses.push(course);
-  });
-
-  if (courses.length === 0) {
-    throw new Error("rows matched but no course names could be extracted");
-  }
-  return courses;
 }
 
 /**
@@ -187,14 +117,14 @@ async function scrapeCondition(condition: SearchCondition): Promise<Course[]> {
  * （＝サイトが復旧すれば次回のアクセスで再度ライブ取得を試みる）。
  */
 const cachedScrapeByQuery = unstable_cache(
-  async (normalizedQuery: string) => scrapeCondition({ query: normalizedQuery }),
-  ["jikanwari-syllabus-scrape-v1"],
+  async (normalizedQuery: string) => scrapeCampusCourseWithDetail({ subjectName: normalizedQuery, limit: 20 }),
+  ["jikanwari-syllabus-scrape-v2"],
   { revalidate: 60 * 60 * 24 * 30, tags: ["syllabus-scrape"] }
 );
 
 /**
  * Ver.2方針: 検索語について、まずライブスクレイピング（サーバー共有キャッシュ経由）
- * を試みる。失敗（到達不能・構造不一致）した場合は空の結果と警告メッセージを返す
+ * を試みる。失敗（到達不能・0件）した場合は空の結果と警告メッセージを返す
  * （フェイクデータで埋めることはしない）。
  * 成功したデータはさらに呼び出し側（クライアント）がIndexedDBへキャッシュし、
  * 同じブラウザからは以降このAPI自体を呼ばない想定。
@@ -202,66 +132,42 @@ const cachedScrapeByQuery = unstable_cache(
 export async function scrapeSyllabus(query: string): Promise<ScrapeResult> {
   const normalized = normalizeQuery(query);
   try {
-    const courses = await cachedScrapeByQuery(normalized);
-    return { courses };
+    const scraped = await cachedScrapeByQuery(normalized);
+    if (scraped.length === 0) throw new Error("no matching courses found");
+    return { courses: scraped.map(mapScrapedCourseToCourse) };
   } catch (err) {
     return {
       courses: [],
       warning: `大学シラバスサイトへのライブ検索に失敗しました（${
         err instanceof Error ? err.message : String(err)
-      }）。すでに読み込み済みの130科目以外は、大学サイトへ到達できる環境で src/lib/scraper-config.ts のセレクタを実サイトのHTML構造に合わせて調整するまで検索できません。`,
+      }）。すでに読み込み済みの130科目以外は、大学サイトへ到達できる環境で src/lib/scraping/scraper-config.ts のフィールド名・セレクタを実構造に合わせて調整するまで検索できません。`,
     };
   }
-}
-
-function dedupeCourses(courses: Course[]): Course[] {
-  const byId = new Map<string, Course>();
-  for (const c of courses) byId.set(c.id, c);
-  return Array.from(byId.values());
 }
 
 /**
  * public/data/asahikawa-courses-2026.json の元データが実際に収集された際の手法
- * （raw["取得元検索条件"]に "grade1"〜"grade3" 等が残っている）を再現し、学年ごとに
- * 検索して全件を収集する。曜日によるキーワード検索は行っていない（学年条件だけで
- * 全学年をカバーできる想定）。1件でも学年検索が成功すればそれを採用し、全学年で
- * 失敗した場合のみ例外を投げる。
+ * （raw["取得元検索条件"]に "grade1"〜"grade3"/"day1"〜"day5" 等が残っている）を
+ * 再現し、学年×曜日ごとに検索して全件を収集する（scrapeAllEconomicsCourses）。
+ * 詳細ページまでは取得しない（件数が多く負荷が大きいため、検索結果一覧のみ）。
  */
 export async function scrapeAllCourses(): Promise<SyncResult> {
-  const results: Course[] = [];
-  let queriesAttempted = 0;
-  let queriesFailed = 0;
-  let lastError: unknown;
+  const gradeCount = ASAHIKAWA_SCRAPER_CONFIG.campusWeb.gradeValues.length;
+  const dayCount = ASAHIKAWA_SCRAPER_CONFIG.campusWeb.dayValues.length;
+  const queriesAttempted = gradeCount * dayCount;
 
-  for (const grade of SCRAPER_CONFIG.gradeValues) {
-    queriesAttempted += 1;
-    try {
-      const courses = await scrapeCondition({ grade });
-      results.push(...courses);
-    } catch (err) {
-      queriesFailed += 1;
-      lastError = err;
-    }
-  }
-
-  const courses = dedupeCourses(results);
-  if (courses.length === 0) {
+  try {
+    const scraped = await scrapeAllEconomicsCourses();
+    if (scraped.length === 0) throw new Error("no courses returned from any grade/day combination");
+    return { courses: scraped.map(mapScrapedCourseToCourse), queriesAttempted, queriesFailed: 0 };
+  } catch (err) {
     return {
       courses: [],
       queriesAttempted,
-      queriesFailed,
+      queriesFailed: queriesAttempted,
       warning: `全件同期に失敗しました（${
-        lastError instanceof Error ? lastError.message : String(lastError)
-      }）。搭載済みの130科目データはそのまま利用できます。大学サイトへ到達できる環境で src/lib/scraper-config.ts のフィールド名・セレクタを実構造に合わせて調整してください。`,
+        err instanceof Error ? err.message : String(err)
+      }）。搭載済みの130科目データはそのまま利用できます。大学サイトへ到達できる環境で src/lib/scraping/scraper-config.ts のフィールド名・セレクタを実構造に合わせて調整してください。`,
     };
   }
-  return {
-    courses,
-    queriesAttempted,
-    queriesFailed,
-    warning:
-      queriesFailed > 0
-        ? `${queriesAttempted}件中${queriesFailed}件の条件でスクレイピングに失敗しましたが、成功した分は反映しました。`
-        : undefined,
-  };
 }

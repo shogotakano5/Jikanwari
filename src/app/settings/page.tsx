@@ -68,7 +68,7 @@ export default function SettingsPage() {
       }
       const note =
         data.courses.length > 0
-          ? `大学サイトから${data.courses.length}科目を取得し反映しました（${data.queriesAttempted}件中${data.queriesAttempted - data.queriesFailed}件の学年検索が成功）。`
+          ? `大学サイトから${data.courses.length}科目を取得し反映しました（学年×曜日ごとに検索した結果をまとめたものです）。`
           : data.warning ?? "更新できる新しいデータはありませんでした。";
       setSyncMessage(note);
       await updateSettings({ ...form, lastSyllabusSyncNote: note });
