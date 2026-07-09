@@ -3,11 +3,21 @@
 import { useState } from "react";
 import { useAppData } from "@/contexts/AppDataContext";
 import { GRADUATION_REQUIREMENT_SETS } from "@/lib/graduation-requirements";
+import type { Course } from "@/types";
+
+interface SyncResponse {
+  courses: Course[];
+  queriesAttempted: number;
+  queriesFailed: number;
+  warning?: string;
+}
 
 export default function SettingsPage() {
-  const { settings, updateSettings } = useAppData();
+  const { settings, updateSettings, addCourses } = useAppData();
   const [form, setForm] = useState(settings);
   const [saved, setSaved] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const entryYearOptions = Array.from(new Set(GRADUATION_REQUIREMENT_SETS.map((s) => s.entryYearFrom))).sort();
 
@@ -15,6 +25,29 @@ export default function SettingsPage() {
     await updateSettings(form);
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
+  }
+
+  async function handleSync() {
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      const res = await fetch("/api/syllabus/sync", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: SyncResponse = await res.json();
+      if (data.courses.length > 0) {
+        await addCourses(data.courses);
+      }
+      const note =
+        data.courses.length > 0
+          ? `大学サイトから${data.courses.length}科目を取得し反映しました（${data.queriesAttempted}件中${data.queriesAttempted - data.queriesFailed}件の学年検索が成功）。`
+          : data.warning ?? "更新できる新しいデータはありませんでした。";
+      setSyncMessage(note);
+      await updateSettings({ ...form, lastSyllabusSyncNote: note });
+    } catch (e) {
+      setSyncMessage(e instanceof Error ? `更新に失敗しました: ${e.message}` : "更新に失敗しました");
+    } finally {
+      setSyncing(false);
+    }
   }
 
   return (
@@ -90,6 +123,17 @@ export default function SettingsPage() {
           シラバスは初めて検索した授業のみ大学サイトから取得し、以降はこの端末に保存されたデータを利用します。
         </p>
         {settings.lastSyllabusSyncNote && <p className="mt-2 font-medium text-zinc-600 dark:text-zinc-300">初期科目データ: {settings.lastSyllabusSyncNote}</p>}
+        <button
+          onClick={handleSync}
+          disabled={syncing}
+          className="mt-3 rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-200 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-200"
+        >
+          {syncing ? "大学サイトへ問い合わせ中..." : "大学サイトから最新のシラバスを取得する"}
+        </button>
+        {syncMessage && <p className="mt-2 text-zinc-600 dark:text-zinc-300">{syncMessage}</p>}
+        <p className="mt-2 text-zinc-400">
+          学年（1〜4年）ごとに検索を行い、搭載済みの科目データへ追加・更新します。大学サイトへ到達できない環境では失敗しますが、既存のデータは失われません。
+        </p>
       </div>
     </div>
   );

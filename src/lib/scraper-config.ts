@@ -21,6 +21,14 @@
  * 基盤とした日本の大学向け教務システム（いわゆる「キャンパスウェブ」系）で
  * 非常によく見られる一般的な構造を前提に実装している。
  *
+ * さらに、実データ各科目の raw["取得元検索条件"] フィールドに "grade1"〜"grade3" や
+ * "day1"〜"day5" という値が残っており、これは実データを収集したスクレイパーが
+ * キーワードの自由入力ではなく「学年」「曜日」を条件に検索を繰り返して全件を
+ * 収集していたことを示す一次情報である。そのため本実装も、科目名によるキーワード
+ * 検索に加えて、学年・曜日を条件にした全件同期（scrapeAllCourses / bulkQueryCandidates）
+ * を用意し、同じ戦略を再現できるようにしている。学年・曜日のフィールド名自体は
+ * 依然として未確認のため、こちらもよくある命名を複数候補用意している。
+ *
  * Strutsベースのシステムは通常、検索フォームのGET時にCSRFトークン等の
  * hidden inputをセッションに紐づけて発行し、POST時にそれを一緒に送る必要が
  * あることが多い。そのため scraper.ts では
@@ -53,6 +61,14 @@ export const SCRAPER_CONFIG = {
     "kougiName",
   ],
   instructorNameFieldCandidates: ["kmInstructorName", "kyoinName", "risyunendo_str_kyoinName"],
+  // 実データの raw["取得元検索条件"] (grade1〜grade3, day1〜day5) から、学年・曜日
+  // による絞り込み検索が実在することが分かっている。フィールド名自体は未確認のため
+  // よくある命名を複数候補用意し、POST時に同時送信する。
+  gradeFieldCandidates: ["gakunen", "risyunendo_str_gakunen", "grade", "configuredGrade"],
+  dayFieldCandidates: ["youbi", "risyunendo_str_youbi", "day", "youbiCd"],
+  // 学年(1〜4)・曜日(1=月〜7=日、実データでは1〜5のみ観測)の値そのもの。
+  gradeValues: [1, 2, 3, 4],
+  dayValues: [1, 2, 3, 4, 5],
   submitActionFieldCandidates: { search: "1" } as Record<string, string>,
 
   // GETしたフォームページから収集するhidden inputのセレクタ（CSRFトークン等）
