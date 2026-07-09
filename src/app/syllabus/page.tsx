@@ -13,6 +13,7 @@ export default function SyllabusSearchPage() {
   const [day, setDay] = useState("");
   const [period, setPeriod] = useState("");
   const [grade, setGrade] = useState("");
+  const [subjectGroup, setSubjectGroup] = useState("");
   const [loading, setLoading] = useState(false);
   const [warning, setWarning] = useState<string | null>(null);
   const [remoteResults, setRemoteResults] = useState<Course[] | null>(null);
@@ -31,8 +32,9 @@ export default function SyllabusSearchPage() {
       day: day || undefined,
       period: period ? Number(period) : undefined,
     }).map((r) => r.course);
-    return grade ? base.filter((c) => c.targetYears.length === 0 || c.targetYears.includes(Number(grade))) : base;
-  }, [courses, query, day, period, grade]);
+    const byGrade = grade ? base.filter((c) => c.targetYears.length === 0 || c.targetYears.includes(Number(grade))) : base;
+    return subjectGroup ? byGrade.filter((c) => c.subjectGroup === subjectGroup) : byGrade;
+  }, [courses, query, day, period, grade, subjectGroup]);
 
   const results = remoteResults ?? localResults;
 
@@ -114,6 +116,15 @@ export default function SyllabusSearchPage() {
               {p}限
             </option>
           ))}
+        </select>
+        <select
+          value={subjectGroup}
+          onChange={(e) => setSubjectGroup(e.target.value)}
+          className="rounded-lg border border-zinc-300 px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+        >
+          <option value="">科目群を絞らない</option>
+          <option value="基幹科目">基幹科目のみ</option>
+          <option value="総合科目">総合科目のみ</option>
         </select>
       </div>
 

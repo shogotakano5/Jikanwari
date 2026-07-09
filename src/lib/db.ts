@@ -3,7 +3,7 @@ import type { Course, TimetableEntry, CompletedCourse, FavoriteEntry, Settings }
 import { fetchRealCourseSeed } from "./real-course-import";
 
 const DB_NAME = "jikanwari";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 interface JikanwariDB extends DBSchema {
   courses: {
@@ -75,6 +75,10 @@ export function getDB(): Promise<IDBPDatabase<JikanwariDB>> {
         // v3->v4: デモデータへのフォールバックを完全に廃止したため、v3時点で
         // デモデータのまま残っている可能性のあるcoursesストアを再投入対象にする。
         if (oldVersion < 4 && oldVersion > 0) {
+          db.clear("courses");
+        }
+        // v4->v5: Course.subjectGroup(基幹科目/総合科目)を追加したため再投入する。
+        if (oldVersion < 5 && oldVersion > 0) {
           db.clear("courses");
         }
       },

@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useAppData, timetableSlotId } from "@/contexts/AppDataContext";
+import { useAppData } from "@/contexts/AppDataContext";
 import { PERIODS, WEEKDAYS, TERMS, GRADES, type Grade, type Period, type Term, type Weekday } from "@/types";
-import { gradeMatchesCourse, termMatchesSemester } from "@/lib/timetable";
+import { autoPlaceRequiredCourses } from "@/lib/timetable";
 import { findRequirementSet } from "@/lib/graduation-requirements";
 import CellDetailModal from "./CellDetailModal";
 
@@ -28,27 +28,7 @@ export default function TimetableGrid() {
 
   async function autoPlaceRequired() {
     if (!requirementSet) return;
-    const requiredCourses = courses.filter(
-      (c) =>
-        c.day &&
-        c.period &&
-        (c.categoryKey === "必修" || requirementSet.categories.some((cat) => cat.matchNames?.includes(c.name) && cat.label === "必修")) &&
-        gradeMatchesCourse(c, grade) &&
-        termMatchesSemester(c.semester, term)
-    );
-    let placed = 0;
-    let skipped = 0;
-    for (const course of requiredCourses) {
-      if (!course.day || !course.period) continue;
-      const id = timetableSlotId(grade, term, course.day, course.period);
-      const existing = timetable.find((t) => t.id === id);
-      if (!existing) {
-        await assignToTimetable(grade, term, course.day, course.period, course.id);
-        placed += 1;
-      } else if (existing.courseId !== course.id) {
-        skipped += 1;
-      }
-    }
+    const { placed, skipped } = await autoPlaceRequiredCourses(courses, timetable, requirementSet, grade, term, assignToTimetable);
     setAutoPlaceMessage(
       `${grade}年 ${term} の必修を${placed}件配置しました。${skipped > 0 ? `${skipped}件は同じ時間に別の授業が既にあるため保留です。` : ""}`
     );

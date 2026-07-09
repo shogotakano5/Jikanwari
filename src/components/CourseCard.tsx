@@ -63,6 +63,17 @@ export default function CourseCard({
         </p>
       )}
       <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500">
+        {course.subjectGroup && (
+          <span
+            className={`rounded px-1.5 py-0.5 font-medium ${
+              course.subjectGroup === "基幹科目"
+                ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300"
+                : "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300"
+            }`}
+          >
+            {course.subjectGroup}
+          </span>
+        )}
         {course.room && <span className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">{course.room}</span>}
         {course.textbook && <span className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">教科書: {course.textbook}</span>}
         <span className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">大学サイト取得</span>

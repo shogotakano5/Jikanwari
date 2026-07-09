@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useAppData, timetableSlotId } from "@/contexts/AppDataContext";
+import { useAppData } from "@/contexts/AppDataContext";
 import { findRequirementSet, judgeGraduation, classifyCourse } from "@/lib/graduation-requirements";
-import { gradeMatchesCourse, termMatchesSemester } from "@/lib/timetable";
+import { autoPlaceRequiredCourses, gradeMatchesCourse, termMatchesSemester } from "@/lib/timetable";
 import { GRADES, TERMS, type Grade, type Term } from "@/types";
 import CourseCard from "@/components/CourseCard";
+import ElectiveRequiredDialog from "@/components/ElectiveRequiredDialog";
 
 export default function PlannerPage() {
   const { courses, timetable, completed, courseById, favorites, statusByCourseId, assignToTimetable, toggleFavorite, settings } =
@@ -14,6 +15,7 @@ export default function PlannerPage() {
   const [term, setTerm] = useState<Term>("前期");
   const [activeCategoryKey, setActiveCategoryKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [showElectiveDialog, setShowElectiveDialog] = useState(false);
 
   const requirementSet = useMemo(
     () => findRequirementSet(settings.entryYear, settings.faculty, settings.department),
@@ -43,27 +45,7 @@ export default function PlannerPage() {
 
   async function autoPlaceRequired() {
     if (!requirementSet) return;
-    const requiredCourses = courses.filter(
-      (c) =>
-        c.day &&
-        c.period &&
-        classifyCourse(c, requirementSet).label === "必修" &&
-        gradeMatchesCourse(c, grade) &&
-        termMatchesSemester(c.semester, term)
-    );
-    let placed = 0;
-    let skipped = 0;
-    for (const course of requiredCourses) {
-      if (!course.day || !course.period) continue;
-      const id = timetableSlotId(grade, term, course.day, course.period);
-      const existing = timetable.find((t) => t.id === id);
-      if (!existing) {
-        await assignToTimetable(grade, term, course.day, course.period, course.id);
-        placed += 1;
-      } else if (existing.courseId !== course.id) {
-        skipped += 1;
-      }
-    }
+    const { placed, skipped } = await autoPlaceRequiredCourses(courses, timetable, requirementSet, grade, term, assignToTimetable);
     setMessage(`${grade}年 ${term} の必修を${placed}件配置しました。${skipped > 0 ? `${skipped}件は同じ時間に別の授業が既にあるため保留です。` : ""}`);
   }
 
@@ -111,8 +93,15 @@ export default function PlannerPage() {
         >
           必修を自動配置
         </button>
+        <button
+          onClick={() => setShowElectiveDialog(true)}
+          className="rounded-lg bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300"
+        >
+          選択必修を選ぶ
+        </button>
       </div>
       {message && <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">{message}</p>}
+      {showElectiveDialog && <ElectiveRequiredDialog onClose={() => setShowElectiveDialog(false)} />}
 
       {judgement && (
         <div className="mt-4">

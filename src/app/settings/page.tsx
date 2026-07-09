@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useAppData } from "@/contexts/AppDataContext";
-import { GRADUATION_REQUIREMENT_SETS } from "@/lib/graduation-requirements";
+import { GRADUATION_REQUIREMENT_SETS, findRequirementSet } from "@/lib/graduation-requirements";
+import { autoPlaceRequiredCoursesEverywhere } from "@/lib/timetable";
 import type { Course } from "@/types";
+import ElectiveRequiredDialog from "@/components/ElectiveRequiredDialog";
 
 interface SyncResponse {
   courses: Course[];
@@ -13,18 +15,45 @@ interface SyncResponse {
 }
 
 export default function SettingsPage() {
-  const { settings, updateSettings, addCourses } = useAppData();
+  const { settings, updateSettings, addCourses, courses, timetable, assignToTimetable } = useAppData();
   const [form, setForm] = useState(settings);
   const [saved, setSaved] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [autoPlaceMessage, setAutoPlaceMessage] = useState<string | null>(null);
+  const [showElectiveDialog, setShowElectiveDialog] = useState(false);
 
   const entryYearOptions = Array.from(new Set(GRADUATION_REQUIREMENT_SETS.map((s) => s.entryYearFrom))).sort();
+
+  // 入学年度・学部・学科を選ぶと、対応する履修ガイド（卒業要件セット）を
+  // 保存する前にその場でプレビューできる。
+  const previewRequirementSet = useMemo(
+    () => findRequirementSet(form.entryYear, form.faculty, form.department),
+    [form.entryYear, form.faculty, form.department]
+  );
+
+  const syllabusYears = useMemo(
+    () => Array.from(new Set(courses.map((c) => c.syllabusYear).filter((y): y is number => Boolean(y)))).sort(),
+    [courses]
+  );
 
   async function handleSave() {
     await updateSettings(form);
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
+
+    // Ver.11方針: 必修科目は学生が選ぶものではないため、履修ガイドが決まったら
+    // 全学年・全学期にデフォルトで自動配置する。
+    const requirementSet = findRequirementSet(form.entryYear, form.faculty, form.department);
+    if (requirementSet) {
+      const { placed, skipped } = await autoPlaceRequiredCoursesEverywhere(courses, timetable, requirementSet, assignToTimetable);
+      setAutoPlaceMessage(
+        placed > 0
+          ? `必修科目${placed}件を時間割へ自動配置しました。${skipped > 0 ? `（${skipped}件は既存の授業と重複のため保留）` : ""} 続けて選択必修を選んでください。`
+          : "必修科目はすでに配置済みです。"
+      );
+      setShowElectiveDialog(true);
+    }
   }
 
   async function handleSync() {
@@ -53,7 +82,9 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 pt-6 pb-8">
       <h1 className="text-xl font-bold">設定</h1>
-      <p className="mt-1 text-sm text-zinc-500">卒業判定に使用する入学年度・学部・学科を設定します。</p>
+      <p className="mt-1 text-sm text-zinc-500">
+        入学年度・学部・学科を選ぶと、対応する履修ガイド（卒業要件）とシラバスが自動的に切り替わります。
+      </p>
 
       <div className="mt-4 flex flex-col gap-4">
         <label className="flex flex-col gap-1 text-sm">
@@ -89,6 +120,35 @@ export default function SettingsPage() {
           />
         </label>
 
+        {/* 選択中の入学年度・学部・学科に対応する履修ガイドのプレビュー */}
+        <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs dark:border-blue-900 dark:bg-blue-950/40">
+          {previewRequirementSet ? (
+            <>
+              <p className="font-semibold text-blue-700 dark:text-blue-300">
+                対応する履修ガイド: {previewRequirementSet.note}
+              </p>
+              <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-blue-700 dark:text-blue-300">
+                <li>総取得単位 {previewRequirementSet.totalCreditsRequired}単位</li>
+                {previewRequirementSet.categories.map((c) => (
+                  <li key={c.key}>
+                    {c.groupLabel ?? c.label} {c.requiredCredits}単位
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="text-amber-700 dark:text-amber-300">
+              この入学年度・学部・学科に対応する履修ガイドが見つかりません。学部・学科の表記を確認してください。
+            </p>
+          )}
+          {syllabusYears.length > 0 && (
+            <p className="mt-1 text-blue-600 dark:text-blue-400">
+              搭載中のシラバスデータ: {syllabusYears.map((y) => `${y}年度`).join("・")}
+              {syllabusYears.length === 1 && "（現時点で複数年度分のシラバスは搭載されていません）"}
+            </p>
+          )}
+        </div>
+
         <label className="flex flex-col gap-1 text-sm">
           表示名（任意）
           <input
@@ -112,7 +172,14 @@ export default function SettingsPage() {
         </label>
 
         <button onClick={handleSave} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
-          {saved ? "保存しました" : "保存する"}
+          {saved ? "保存しました" : "保存する（必修を自動配置→選択必修を選ぶ）"}
+        </button>
+        {autoPlaceMessage && <p className="text-xs text-blue-600 dark:text-blue-400">{autoPlaceMessage}</p>}
+        <button
+          onClick={() => setShowElectiveDialog(true)}
+          className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200"
+        >
+          選択必修を選び直す
         </button>
       </div>
 
@@ -135,6 +202,8 @@ export default function SettingsPage() {
           学年（1〜4年）ごとに検索を行い、搭載済みの科目データへ追加・更新します。大学サイトへ到達できない環境では失敗しますが、既存のデータは失われません。
         </p>
       </div>
+
+      {showElectiveDialog && <ElectiveRequiredDialog onClose={() => setShowElectiveDialog(false)} />}
     </div>
   );
 }

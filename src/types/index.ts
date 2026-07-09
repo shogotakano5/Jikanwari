@@ -14,6 +14,9 @@ export type Grade = (typeof GRADES)[number];
 
 export type CategoryKey = "必修" | "選択必修" | "選択" | "自由選択";
 
+/** 必修/選択必修等の履修区分(mandatory-ness)とは別軸の科目群分類 */
+export type SubjectGroup = "基幹科目" | "総合科目";
+
 export type CourseStatus = "completed" | "inProgress" | "planned";
 export const COURSE_STATUS_LABELS: Record<CourseStatus, string> = {
   completed: "履修済み",
@@ -35,6 +38,7 @@ export interface Course {
   department: string;
   credits: number;
   targetYears: number[]; // 配当学年 e.g. [1,2]
+  syllabusYear?: number; // このシラバス情報が対象とする開講年度（例: 2026）
   semester: Semester;
   /** 集中講義など、固定の曜日・時限を持たない科目は未設定になる */
   day?: Weekday;
@@ -56,6 +60,8 @@ export interface Course {
    */
   categoryKey?: CategoryKey;
   categoryGroup?: string; // e.g. 選択必修グループ名 "選択必修A"
+  /** 科目名に「基幹科目群」「総合科目群」等の明示がある場合のみ設定される（推測しない） */
+  subjectGroup?: SubjectGroup;
   source: "scraped";
   syllabusUrl?: string;
   cachedAt: number;

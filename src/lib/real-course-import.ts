@@ -1,4 +1,4 @@
-import type { Course, EvaluationItem, Period, Semester, Weekday } from "@/types";
+import type { Course, EvaluationItem, Period, Semester, SubjectGroup, Weekday } from "@/types";
 import { WEEKDAYS } from "@/types";
 
 /**
@@ -76,6 +76,16 @@ function nonEmpty(value: string | undefined): string | undefined {
   return value && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+/**
+ * 科目名に「基幹科目群特論／」「総合科目群特論／」のような明示的な接頭辞がある
+ * 場合のみ判定する（それ以外の科目については学生便覧を確認できていないため推測しない）。
+ */
+function parseSubjectGroup(name: string): SubjectGroup | undefined {
+  if (name.startsWith("基幹科目群")) return "基幹科目";
+  if (name.startsWith("総合科目群")) return "総合科目";
+  return undefined;
+}
+
 export function mapRawCourseToCourse(raw: RawCourseRecord): Course {
   const rawFields = raw.raw ?? {};
   return {
@@ -86,6 +96,7 @@ export function mapRawCourseToCourse(raw: RawCourseRecord): Course {
     department: raw.department || nonEmpty(rawFields["対象学科"]) || "経営経済学科",
     credits: Math.round(raw.credits) || 2,
     targetYears: parseTargetYears(rawFields["配当学年"]),
+    syllabusYear: raw.year || undefined,
     semester: parseSemester(raw.semester),
     day: parseDay(raw.day),
     period: zenkakuDigitsToNumber(raw.period) as Period | undefined,
@@ -100,6 +111,7 @@ export function mapRawCourseToCourse(raw: RawCourseRecord): Course {
     references: nonEmpty(rawFields["参考書"]),
     keywords: [],
     // categoryKeyは付けない: classifyCourse()が科目名から必修/選択必修A〜Eを自動判定する
+    subjectGroup: parseSubjectGroup(raw.name),
     source: "scraped",
     syllabusUrl: raw.syllabus_url || undefined,
     cachedAt: Date.now(),
