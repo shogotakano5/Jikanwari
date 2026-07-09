@@ -1,12 +1,19 @@
 import type { Course } from "@/types";
 
-/** 検索クエリの正規化: 前後空白除去・連続空白圧縮・大文字小文字統一・カタカナ→ひらがな変換（あいまい検索用） */
+/**
+ * 検索クエリの正規化:
+ * - 前後空白除去・連続空白圧縮
+ * - 大文字小文字統一
+ * - 全角英数字→半角（全角/半角の表記ゆれを吸収）
+ * - カタカナ→ひらがな変換（あいまい検索用）
+ */
 export function normalizeQuery(input: string): string {
   return input
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase()
-    .replace(/[ァ-ン]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60)); // カタカナ->ひらがな相当にシフト(簡易)
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+    .replace(/[ァ-ン]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
 }
 
 function haystack(course: Course): string {
@@ -16,7 +23,11 @@ function haystack(course: Course): string {
       course.nameKana ?? "",
       course.teacher,
       course.overview,
+      course.goals ?? "",
+      course.prerequisites ?? "",
+      course.courseNumbering ?? "",
       course.textbook ?? "",
+      course.references ?? "",
       course.keywords.join(" "),
       course.faculty,
       course.department,
@@ -24,6 +35,17 @@ function haystack(course: Course): string {
       course.evaluation.map((e) => e.type).join(" "),
     ].join(" ")
   );
+}
+
+/** 文字が順序通り部分列として含まれるかを判定する簡易あいまい検索（例:「みくろけ」で「ミクロ経済学」にヒット） */
+function fuzzySubsequenceMatch(haystackText: string, query: string): boolean {
+  if (query.length === 0) return true;
+  let index = 0;
+  for (const ch of haystackText) {
+    if (ch === query[index]) index += 1;
+    if (index === query.length) return true;
+  }
+  return false;
 }
 
 export interface SearchOptions {
@@ -41,8 +63,10 @@ export interface SearchResult {
 }
 
 /**
- * 部分一致・大文字小文字無視・空白除去に対応した全文検索。
- * 科目名/教員名の一致を最優先し、概要・キーワード等の一致は加点で扱う（あいまい検索）。
+ * 部分一致・大文字小文字無視・空白除去・全角半角ゆれに対応した全文検索。
+ * 科目名/教員名の一致を最優先し、概要・キーワード等の一致は加点で扱う。
+ * どのフィールドにも部分一致しない場合は、科目名に対する部分列あいまい検索
+ * （例:「みくろけ」で「ミクロ経済学」にヒット）にフォールバックする。
  */
 export function searchCourses(courses: Course[], options: SearchOptions): SearchResult[] {
   const q = normalizeQuery(options.query ?? "");
@@ -81,6 +105,9 @@ export function searchCourses(courses: Course[], options: SearchOptions): Search
       } else if (full.includes(term)) {
         score += 2;
         if (matchedField === "other") matchedField = "overview";
+      } else if (fuzzySubsequenceMatch(name, term)) {
+        score += 1;
+        if (matchedField === "other") matchedField = "name";
       } else {
         allTermsMatch = false;
       }

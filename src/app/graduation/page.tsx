@@ -3,9 +3,10 @@
 import { useMemo } from "react";
 import { useAppData } from "@/contexts/AppDataContext";
 import { findRequirementSet, judgeGraduation } from "@/lib/graduation-requirements";
+import { COURSE_STATUS_LABELS } from "@/types";
 
 export default function GraduationPage() {
-  const { settings, completed, courseById, courses, unmarkCompleted } = useAppData();
+  const { settings, completed, courseById, courses, clearCourseStatus } = useAppData();
 
   const requirementSet = useMemo(
     () => findRequirementSet(settings.entryYear, settings.faculty, settings.department),
@@ -37,17 +38,25 @@ export default function GraduationPage() {
         {requirementSet.department}（{requirementSet.note}）
       </p>
 
-      <div
-        className={`mt-4 rounded-xl p-4 text-center ${
-          judgement.canGraduate
-            ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300"
-            : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
-        }`}
-      >
-        <p className="text-2xl font-bold">{judgement.canGraduate ? "○ 卒業可能" : "× 不足あり"}</p>
-        <p className="mt-1 text-sm">
-          総取得単位 {judgement.totalOverallEarnedCredits} / {judgement.totalCreditsRequired}
-        </p>
+      <div className="mt-4 flex items-center gap-4 rounded-xl bg-white p-4 shadow-sm dark:bg-zinc-900">
+        <div
+          className="relative flex h-24 w-24 shrink-0 items-center justify-center rounded-full text-sm font-bold"
+          style={{
+            background: `conic-gradient(${judgement.canGraduate ? "#22c55e" : "#3b82f6"} ${judgement.scorePercent}%, rgb(228 228 231) 0)`,
+          }}
+        >
+          <div className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-white dark:bg-zinc-900">
+            {judgement.scorePercent}%
+          </div>
+        </div>
+        <div>
+          <p className={`text-xl font-bold ${judgement.canGraduate ? "text-green-600" : "text-amber-600"}`}>
+            {judgement.canGraduate ? "○ 卒業可能" : "× 不足あり"}
+          </p>
+          <p className="mt-1 text-sm text-zinc-500">
+            総取得単位 {judgement.totalOverallEarnedCredits} / {judgement.totalCreditsRequired}
+          </p>
+        </div>
       </div>
 
       <div className="mt-4 flex flex-col gap-3">
@@ -102,9 +111,9 @@ export default function GraduationPage() {
       )}
 
       <div className="mt-6">
-        <h2 className="mb-2 text-sm font-semibold text-zinc-500">履修済み科目一覧</h2>
+        <h2 className="mb-2 text-sm font-semibold text-zinc-500">履修状況一覧</h2>
         {completed.length === 0 ? (
-          <p className="text-sm text-zinc-400">まだ履修済みの科目が登録されていません。時間割のセルから「履修済みにする」で登録できます。</p>
+          <p className="text-sm text-zinc-400">まだ履修状況が登録されていません。時間割のセルから「履修済み/履修中/履修予定」を設定できます。</p>
         ) : (
           <div className="flex flex-col gap-2">
             {completed.map((rec) => {
@@ -112,9 +121,9 @@ export default function GraduationPage() {
               return (
                 <div key={rec.courseId} className="flex items-center justify-between rounded-lg border border-zinc-200 p-2 text-sm dark:border-zinc-800">
                   <span>
-                    {c?.name ?? rec.courseId}（{rec.completedYear}年度 ・ {rec.creditsEarned}単位）
+                    {c?.name ?? rec.courseId}（{COURSE_STATUS_LABELS[rec.status]} ・ {rec.completedYear}年度 ・ {rec.creditsEarned}単位）
                   </span>
-                  <button onClick={() => unmarkCompleted(rec.courseId)} className="text-xs text-red-500 hover:underline">
+                  <button onClick={() => clearCourseStatus(rec.courseId)} className="text-xs text-red-500 hover:underline">
                     取り消す
                   </button>
                 </div>

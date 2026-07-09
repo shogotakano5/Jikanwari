@@ -49,7 +49,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
         <AppDataProvider>
           <ServiceWorkerRegister />
-          <main className="flex-1 pb-20">{children}</main>
+          <main className="flex-1 pb-20 sm:pb-6 sm:pl-56">{children}</main>
           <BottomNav />
         </AppDataProvider>
       </body>

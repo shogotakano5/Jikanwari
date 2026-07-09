@@ -5,8 +5,21 @@ export const PERIODS = [1, 2, 3, 4, 5, 6, 7] as const;
 export type Period = (typeof PERIODS)[number];
 
 export type Semester = "前期" | "後期" | "通年" | "集中";
+/** 時間割上のタブとして扱う学期区分（通年科目は前期・後期の両方に現れる） */
+export type Term = "前期" | "後期" | "集中";
+export const TERMS: Term[] = ["前期", "後期", "集中"];
+
+export const GRADES = [1, 2, 3, 4] as const;
+export type Grade = (typeof GRADES)[number];
 
 export type CategoryKey = "必修" | "選択必修" | "選択" | "自由選択";
+
+export type CourseStatus = "completed" | "inProgress" | "planned";
+export const COURSE_STATUS_LABELS: Record<CourseStatus, string> = {
+  completed: "履修済み",
+  inProgress: "履修中",
+  planned: "履修予定",
+};
 
 export interface EvaluationItem {
   type: string; // 試験 / レポート / 出席 / 小テスト / 平常点 etc.
@@ -21,17 +34,25 @@ export interface Course {
   faculty: string;
   department: string;
   credits: number;
-  targetYears: number[]; // 開講学年 e.g. [1,2]
+  targetYears: number[]; // 配当学年 e.g. [1,2]
   semester: Semester;
   day: Weekday;
   period: Period;
   room?: string;
   overview: string;
+  goals?: string; // 到達目標
+  prerequisites?: string; // 履修条件
+  courseNumbering?: string; // 科目ナンバリング
   evaluation: EvaluationItem[];
   textbook?: string;
+  references?: string; // 参考書
   keywords: string[];
-  categoryKey: CategoryKey;
-  categoryGroup?: string; // e.g. 選択必修グループ名 "専門選択必修A"
+  /**
+   * 手動指定の区分（必修/選択必修/選択/自由選択）。未指定の場合は
+   * `classifyCourse()` による科目名ベースの自動判定にフォールバックする。
+   */
+  categoryKey?: CategoryKey;
+  categoryGroup?: string; // e.g. 選択必修グループ名 "選択必修A"
   source: "scraped" | "demo";
   syllabusUrl?: string;
   cachedAt: number;
@@ -39,7 +60,9 @@ export interface Course {
 }
 
 export interface TimetableEntry {
-  id: string; // `${day}-${period}`
+  id: string; // `${grade}-${term}-${day}-${period}`
+  grade: Grade;
+  term: Term;
   day: Weekday;
   period: Period;
   courseId: string;
@@ -48,17 +71,21 @@ export interface TimetableEntry {
 
 export interface CompletedCourse {
   courseId: string;
-  completedYear: number; // 取得年度 (西暦)
+  status: CourseStatus;
+  completedYear: number; // 履修年度 (西暦)
   grade?: string;
   creditsEarned: number;
-  completedAt: number;
+  updatedAt: number;
 }
 
 export interface RequirementCategory {
-  key: string; // unique within the requirement set, e.g. "必修" or "選択必修:専門"
+  key: string; // unique within the requirement set, e.g. "必修" or "選択必修A"
   label: CategoryKey;
-  groupLabel?: string; // display sub-label, e.g. "専門選択必修"
+  groupLabel?: string; // display sub-label, e.g. "選択必修A"
   requiredCredits: number;
+  /** この区分に自動分類する際の科目名マッチルール */
+  matchNames?: string[]; // 完全一致する科目名（必修科目リスト等）
+  matchPattern?: string; // 部分一致させる正規表現ソース（例: "マクロ|ミクロ"）
 }
 
 export interface GraduationRequirementSet {

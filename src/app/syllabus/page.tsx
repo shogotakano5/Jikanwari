@@ -3,20 +3,36 @@
 import { useMemo, useState } from "react";
 import { useAppData } from "@/contexts/AppDataContext";
 import { searchCourses, normalizeQuery } from "@/lib/search";
-import EvaluationBadges from "@/components/EvaluationBadges";
-import type { Course } from "@/types";
+import { findRequirementSet, classifyCourse } from "@/lib/graduation-requirements";
+import { WEEKDAYS, PERIODS, GRADES, type Course, type CourseStatus } from "@/types";
+import CourseCard from "@/components/CourseCard";
 
 export default function SyllabusSearchPage() {
-  const { courses, addCourses, favorites, toggleFavorite } = useAppData();
+  const { courses, addCourses, favorites, toggleFavorite, statusByCourseId, setCourseStatus, clearCourseStatus, settings } = useAppData();
   const [query, setQuery] = useState("");
+  const [day, setDay] = useState("");
+  const [period, setPeriod] = useState("");
+  const [grade, setGrade] = useState("");
   const [loading, setLoading] = useState(false);
   const [warning, setWarning] = useState<string | null>(null);
   const [remoteResults, setRemoteResults] = useState<Course[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const requirementSet = useMemo(
+    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department),
+    [settings.entryYear, settings.faculty, settings.department]
+  );
+
   const favoriteIds = useMemo(() => new Set(favorites.map((f) => f.courseId)), [favorites]);
 
-  const localResults = useMemo(() => searchCourses(courses, { query }).map((r) => r.course), [courses, query]);
+  const localResults = useMemo(() => {
+    const base = searchCourses(courses, {
+      query,
+      day: day || undefined,
+      period: period ? Number(period) : undefined,
+    }).map((r) => r.course);
+    return grade ? base.filter((c) => c.targetYears.length === 0 || c.targetYears.includes(Number(grade))) : base;
+  }, [courses, query, day, period, grade]);
 
   const results = remoteResults ?? localResults;
 
@@ -52,7 +68,7 @@ export default function SyllabusSearchPage() {
     <div className="mx-auto max-w-3xl px-4 pt-6">
       <h1 className="text-xl font-bold">シラバス検索</h1>
       <p className="mt-1 text-sm text-zinc-500">
-        科目名・教員名・授業概要・キーワードから検索できます（部分一致・あいまい検索対応）。
+        科目名・教員名・授業概要・到達目標・評価方法・教科書・キーワードから検索できます（部分一致・あいまい検索対応）。
       </p>
 
       <div className="mt-4 flex gap-2">
@@ -74,6 +90,33 @@ export default function SyllabusSearchPage() {
         </button>
       </div>
 
+      <div className="mt-2 flex flex-wrap gap-2">
+        <select value={grade} onChange={(e) => setGrade(e.target.value)} className="rounded-lg border border-zinc-300 px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+          <option value="">全学年</option>
+          {GRADES.map((g) => (
+            <option key={g} value={g}>
+              {g}年
+            </option>
+          ))}
+        </select>
+        <select value={day} onChange={(e) => setDay(e.target.value)} className="rounded-lg border border-zinc-300 px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+          <option value="">全曜日</option>
+          {WEEKDAYS.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
+        </select>
+        <select value={period} onChange={(e) => setPeriod(e.target.value)} className="rounded-lg border border-zinc-300 px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+          <option value="">全時限</option>
+          {PERIODS.map((p) => (
+            <option key={p} value={p}>
+              {p}限
+            </option>
+          ))}
+        </select>
+      </div>
+
       {error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/30 dark:text-red-300">{error}</p>}
       {warning && !error && (
         <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{warning}</p>
@@ -86,34 +129,16 @@ export default function SyllabusSearchPage() {
           <p className="py-8 text-center text-sm text-zinc-400">該当する科目が見つかりませんでした</p>
         ) : (
           results.map((course) => (
-            <div key={course.id} className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <h3 className="font-semibold">{course.name}</h3>
-                  <p className="text-sm text-zinc-500">
-                    {course.teacher} ・ {course.day}曜{course.period}限 ・ {course.credits}単位
-                  </p>
-                </div>
-                <button
-                  onClick={() => toggleFavorite(course.id)}
-                  className={`text-lg ${favoriteIds.has(course.id) ? "text-amber-500" : "text-zinc-300 dark:text-zinc-700"}`}
-                >
-                  ★
-                </button>
-              </div>
-              {course.overview && <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{course.overview}</p>}
-              <div className="mt-2">
-                <EvaluationBadges items={course.evaluation} />
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-zinc-500">
-                <span className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">
-                  {course.categoryGroup ?? course.categoryKey}
-                </span>
-                <span className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">
-                  {course.source === "scraped" ? "大学サイト取得" : "デモデータ"}
-                </span>
-              </div>
-            </div>
+            <CourseCard
+              key={course.id}
+              course={course}
+              categoryLabel={requirementSet ? classifyCourse(course, requirementSet).groupLabel ?? classifyCourse(course, requirementSet).label : undefined}
+              status={statusByCourseId.get(course.id)}
+              isFavorite={favoriteIds.has(course.id)}
+              onToggleFavorite={() => toggleFavorite(course.id)}
+              onSetStatus={(status: CourseStatus) => setCourseStatus(course.id, status, settings.entryYear, course.credits)}
+              onClearStatus={() => clearCourseStatus(course.id)}
+            />
           ))
         )}
       </div>

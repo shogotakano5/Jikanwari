@@ -1,10 +1,19 @@
 "use client";
 
+import { useMemo } from "react";
 import { useAppData } from "@/contexts/AppDataContext";
-import EvaluationBadges from "@/components/EvaluationBadges";
+import { findRequirementSet, classifyCourse } from "@/lib/graduation-requirements";
+import type { CourseStatus } from "@/types";
+import CourseCard from "@/components/CourseCard";
 
 export default function FavoritesPage() {
-  const { favorites, courses, toggleFavorite } = useAppData();
+  const { favorites, courses, toggleFavorite, statusByCourseId, setCourseStatus, clearCourseStatus, settings } = useAppData();
+
+  const requirementSet = useMemo(
+    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department),
+    [settings.entryYear, settings.faculty, settings.department]
+  );
+
   const favoriteCourses = favorites
     .map((f) => courses.find((c) => c.id === f.courseId))
     .filter((c): c is NonNullable<typeof c> => Boolean(c));
@@ -19,22 +28,16 @@ export default function FavoritesPage() {
           <p className="py-8 text-center text-sm text-zinc-400">お気に入りはまだありません</p>
         ) : (
           favoriteCourses.map((course) => (
-            <div key={course.id} className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <h3 className="font-semibold">{course.name}</h3>
-                  <p className="text-sm text-zinc-500">
-                    {course.teacher} ・ {course.day}曜{course.period}限 ・ {course.credits}単位
-                  </p>
-                </div>
-                <button onClick={() => toggleFavorite(course.id)} className="text-lg text-amber-500">
-                  ★
-                </button>
-              </div>
-              <div className="mt-2">
-                <EvaluationBadges items={course.evaluation} />
-              </div>
-            </div>
+            <CourseCard
+              key={course.id}
+              course={course}
+              categoryLabel={requirementSet ? classifyCourse(course, requirementSet).groupLabel ?? classifyCourse(course, requirementSet).label : undefined}
+              status={statusByCourseId.get(course.id)}
+              isFavorite
+              onToggleFavorite={() => toggleFavorite(course.id)}
+              onSetStatus={(status: CourseStatus) => setCourseStatus(course.id, status, settings.entryYear, course.credits)}
+              onClearStatus={() => clearCourseStatus(course.id)}
+            />
           ))
         )}
       </div>

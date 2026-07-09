@@ -1,7 +1,8 @@
-const CACHE_VERSION = "jikanwari-v1";
+const CACHE_VERSION = "jikanwari-v2";
 const APP_SHELL = [
   "/",
   "/syllabus",
+  "/planner",
   "/graduation",
   "/favorites",
   "/settings",

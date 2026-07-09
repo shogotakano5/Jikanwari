@@ -3,7 +3,7 @@ import type { Course, TimetableEntry, CompletedCourse, FavoriteEntry, Settings }
 import { DEMO_COURSES } from "./demo-courses";
 
 const DB_NAME = "jikanwari";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 interface JikanwariDB extends DBSchema {
   courses: {
@@ -35,7 +35,7 @@ export const DEFAULT_SETTINGS: Settings = {
   id: "app-settings",
   entryYear: 2024,
   faculty: "経済学部",
-  department: "経済学科",
+  department: "経営経済学科",
   theme: "system",
 };
 
@@ -45,7 +45,7 @@ export function getDB(): Promise<IDBPDatabase<JikanwariDB>> {
   }
   if (!dbPromise) {
     dbPromise = openDB<JikanwariDB>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion) {
         if (!db.objectStoreNames.contains("courses")) {
           const store = db.createObjectStore("courses", { keyPath: "id" });
           store.createIndex("by-day-period", ["day", "period"]);
@@ -61,6 +61,14 @@ export function getDB(): Promise<IDBPDatabase<JikanwariDB>> {
         }
         if (!db.objectStoreNames.contains("settings")) {
           db.createObjectStore("settings", { keyPath: "id" });
+        }
+        // v1->v2: timetableのキー形式が `day-period` から `grade-term-day-period` に、
+        // graduationの値に status フィールドが追加された。古い形式のデータは
+        // 意味が変わってしまうため、開発初期段階につき単純にクリアする。
+        if (oldVersion < 2 && oldVersion > 0) {
+          db.clear("timetable");
+          db.clear("graduation");
+          db.clear("courses"); // 学科名・区分分類ロジック変更に伴いデモデータを再投入
         }
       },
     }).then(async (db) => {
