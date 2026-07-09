@@ -3,10 +3,23 @@
  * 向けのスクレイピング設定。
  *
  * この開発環境からは大学サイトへのネットワークアクセスがゲートウェイで
- * ブロックされており（`cx.asahikawa-u.ac.jp` への CONNECT が 403）、実際の
- * HTML構造を確認できていない。`slbssrch.do` という命名は Apache Struts を
+ * ブロックされており（`cx.asahikawa-u.ac.jp` への CONNECT が 403）、検索フォーム
+ * 自体のHTML構造は確認できていない。ただし、別途取得された実データ
+ * （public/data/asahikawa-courses-2026.json、2026年度経済学部経営経済学科130科目）
+ * から、シラバス詳細ページのURL構造は確認できている:
+ *
+ *   https://cx.asahikawa-u.ac.jp/campusweb/slbssbdr.do
+ *     ?value(risyunen)=2026        … 履修年度
+ *     &value(semekikn)=1           … 学期区分(1=前期系？要確認)
+ *     &value(kougicd)=41101301     … 講義コード
+ *     &value(crclumcd)=2611110     … カリキュラムコード
+ *
+ *   科目データのid (`${risyunen}-${kougicd}-${crclumcd}`) からこのURLを組み立て
+ *   直接シラバス詳細へリンクできる（本アプリではsyllabus_urlをそのまま保持している）。
+ *
+ * 検索フォーム側(`slbssrch.do`)のPOSTパラメータ名は未確認のため、Apache Struts を
  * 基盤とした日本の大学向け教務システム（いわゆる「キャンパスウェブ」系）で
- * 非常によく見られるパターンのため、その一般的な構造を前提に実装している。
+ * 非常によく見られる一般的な構造を前提に実装している。
  *
  * Strutsベースのシステムは通常、検索フォームのGET時にCSRFトークン等の
  * hidden inputをセッションに紐づけて発行し、POST時にそれを一緒に送る必要が
@@ -52,10 +65,10 @@ export const SCRAPER_CONFIG = {
     "table.list tr",
     "table.kensaku-result tr",
     ".search-result-row",
-    "table tr:has(a[href*='slbssbdt'])",
+    "table tr:has(a[href*='slbssbdr'])",
   ],
   resultSelectors: {
-    name: "a.subject-link, a[href*='slbssbdt'], a[href*='kamoku']",
+    name: "a.subject-link, a[href*='slbssbdr'], a[href*='kamoku']",
     teacher: ".instructor, td:nth-child(3)",
     credits: ".credits, td:nth-child(4)",
     detailLinkAttr: "href",

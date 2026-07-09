@@ -1,9 +1,10 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { Course, TimetableEntry, CompletedCourse, FavoriteEntry, Settings } from "@/types";
 import { DEMO_COURSES } from "./demo-courses";
+import { fetchRealCourseSeed } from "./real-course-import";
 
 const DB_NAME = "jikanwari";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 interface JikanwariDB extends DBSchema {
   courses: {
@@ -70,6 +71,11 @@ export function getDB(): Promise<IDBPDatabase<JikanwariDB>> {
           db.clear("graduation");
           db.clear("courses"); // 学科名・区分分類ロジック変更に伴いデモデータを再投入
         }
+        // v2->v3: 実データ(asahikawa-courses-2026.json)をシードするため、
+        // デモデータのみで初期化済みのcoursesストアを再投入対象にする。
+        if (oldVersion < 3 && oldVersion > 0) {
+          db.clear("courses");
+        }
       },
     }).then(async (db) => {
       await seedIfEmpty(db);
@@ -82,9 +88,22 @@ export function getDB(): Promise<IDBPDatabase<JikanwariDB>> {
 async function seedIfEmpty(db: IDBPDatabase<JikanwariDB>) {
   const count = await db.count("courses");
   if (count === 0) {
+    let seed: Course[];
+    let syncNote: string;
+    try {
+      seed = await fetchRealCourseSeed();
+      syncNote = `実データ ${seed.length}件を読み込み済み（${new Date().toLocaleDateString("ja-JP")}）`;
+    } catch {
+      seed = DEMO_COURSES;
+      syncNote = "実データの取得に失敗したためデモデータを使用しています";
+    }
     const tx = db.transaction("courses", "readwrite");
-    await Promise.all(DEMO_COURSES.map((c) => tx.store.put(c)));
+    await Promise.all(seed.map((c) => tx.store.put(c)));
     await tx.done;
+
+    const settings = (await db.get("settings", DEFAULT_SETTINGS.id)) ?? DEFAULT_SETTINGS;
+    await db.put("settings", { ...settings, lastSyllabusSyncNote: syncNote });
+    return;
   }
   const settings = await db.get("settings", DEFAULT_SETTINGS.id);
   if (!settings) {

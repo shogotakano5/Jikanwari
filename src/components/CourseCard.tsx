@@ -39,7 +39,8 @@ export default function CourseCard({
         <div>
           <h3 className="font-semibold">{course.name}</h3>
           <p className="text-sm text-zinc-500">
-            {course.teacher} ・ {course.day}曜{course.period}限 ・ {course.credits}単位 ・ {course.semester}
+            {course.teacher} ・ {course.day && course.period ? `${course.day}曜${course.period}限` : "曜日時限未定(集中講義等)"} ・{" "}
+            {course.credits}単位 ・ {course.semester}
           </p>
         </div>
         {onToggleFavorite && (
@@ -79,7 +80,7 @@ export default function CourseCard({
         )}
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
-        {!isAssigned && onAssign && (
+        {!isAssigned && onAssign && course.day && course.period && (
           <button onClick={onAssign} className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
             追加
           </button>

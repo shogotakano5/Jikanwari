@@ -44,11 +44,17 @@ export default function PlannerPage() {
   async function autoPlaceRequired() {
     if (!requirementSet) return;
     const requiredCourses = courses.filter(
-      (c) => classifyCourse(c, requirementSet).label === "必修" && gradeMatchesCourse(c, grade) && termMatchesSemester(c.semester, term)
+      (c) =>
+        c.day &&
+        c.period &&
+        classifyCourse(c, requirementSet).label === "必修" &&
+        gradeMatchesCourse(c, grade) &&
+        termMatchesSemester(c.semester, term)
     );
     let placed = 0;
     let skipped = 0;
     for (const course of requiredCourses) {
+      if (!course.day || !course.period) continue;
       const id = timetableSlotId(grade, term, course.day, course.period);
       const existing = timetable.find((t) => t.id === id);
       if (!existing) {
@@ -62,6 +68,7 @@ export default function PlannerPage() {
   }
 
   async function assignChoice(courseId: string, day: (typeof courses)[number]["day"], period: (typeof courses)[number]["period"]) {
+    if (!day || !period) return;
     await assignToTimetable(grade, term, day, period, courseId);
     setMessage(null);
   }

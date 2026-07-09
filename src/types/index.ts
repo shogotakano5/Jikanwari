@@ -36,13 +36,16 @@ export interface Course {
   credits: number;
   targetYears: number[]; // 配当学年 e.g. [1,2]
   semester: Semester;
-  day: Weekday;
-  period: Period;
+  /** 集中講義など、固定の曜日・時限を持たない科目は未設定になる */
+  day?: Weekday;
+  period?: Period;
   room?: string;
   overview: string;
   goals?: string; // 到達目標
   prerequisites?: string; // 履修条件
   courseNumbering?: string; // 科目ナンバリング
+  syllabusPlan?: string; // 授業計画
+  evaluationNotes?: string; // 評価方法・基準の説明文
   evaluation: EvaluationItem[];
   textbook?: string;
   references?: string; // 参考書

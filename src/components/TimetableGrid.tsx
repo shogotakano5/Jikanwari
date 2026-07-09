@@ -30,6 +30,8 @@ export default function TimetableGrid() {
     if (!requirementSet) return;
     const requiredCourses = courses.filter(
       (c) =>
+        c.day &&
+        c.period &&
         (c.categoryKey === "必修" || requirementSet.categories.some((cat) => cat.matchNames?.includes(c.name) && cat.label === "必修")) &&
         gradeMatchesCourse(c, grade) &&
         termMatchesSemester(c.semester, term)
@@ -37,6 +39,7 @@ export default function TimetableGrid() {
     let placed = 0;
     let skipped = 0;
     for (const course of requiredCourses) {
+      if (!course.day || !course.period) continue;
       const id = timetableSlotId(grade, term, course.day, course.period);
       const existing = timetable.find((t) => t.id === id);
       if (!existing) {
