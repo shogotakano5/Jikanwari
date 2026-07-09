@@ -2,12 +2,10 @@ import * as cheerio from "cheerio";
 import { unstable_cache } from "next/cache";
 import type { Course, EvaluationItem, Weekday } from "@/types";
 import { SCRAPER_CONFIG } from "./scraper-config";
-import { DEMO_COURSES } from "./demo-courses";
-import { searchCourses, normalizeQuery } from "./search";
+import { normalizeQuery } from "./search";
 
 export interface ScrapeResult {
   courses: Course[];
-  source: "scraped" | "demo";
   warning?: string;
 }
 
@@ -72,7 +70,7 @@ async function fetchSearchForm(): Promise<{ cookie: string; hiddenFields: Record
 /**
  * 大学のシラバス検索システムへライブアクセスを試みる。
  * 到達不能・構造不一致など何らかの理由で失敗した場合は必ず例外を投げる
- * （呼び出し側でデモデータへフォールバックする）。
+ * （呼び出し側で「見つかりませんでした」として扱う）。
  */
 async function scrapeLive(query: string): Promise<Course[]> {
   const { cookie, hiddenFields } = await fetchSearchForm();
@@ -165,8 +163,8 @@ const cachedScrapeLive = unstable_cache(
 
 /**
  * Ver.2方針: 検索語について、まずライブスクレイピング（サーバー共有キャッシュ経由）
- * を試みる。失敗（到達不能・構造不一致）した場合はデモデータの中から一致するものを
- * 返し、`source: "demo"` と警告メッセージで呼び出し側に伝える。
+ * を試みる。失敗（到達不能・構造不一致）した場合は空の結果と警告メッセージを返す
+ * （フェイクデータで埋めることはしない）。
  * 成功したデータはさらに呼び出し側（クライアント）がIndexedDBへキャッシュし、
  * 同じブラウザからは以降このAPI自体を呼ばない想定。
  */
@@ -174,15 +172,13 @@ export async function scrapeSyllabus(query: string): Promise<ScrapeResult> {
   const normalized = normalizeQuery(query);
   try {
     const courses = await cachedScrapeLive(normalized);
-    return { courses, source: "scraped" };
+    return { courses };
   } catch (err) {
-    const demoMatches = searchCourses(DEMO_COURSES, { query }).map((r) => r.course);
     return {
-      courses: demoMatches,
-      source: "demo",
-      warning: `大学シラバスサイトへのライブ検索に失敗したため、デモデータを表示しています（${
+      courses: [],
+      warning: `大学シラバスサイトへのライブ検索に失敗しました（${
         err instanceof Error ? err.message : String(err)
-      }）。本番環境でも失敗する場合は src/lib/scraper-config.ts のセレクタを実サイトのHTML構造に合わせて調整してください。`,
+      }）。すでに読み込み済みの130科目以外は、大学サイトへ到達できる環境で src/lib/scraper-config.ts のセレクタを実サイトのHTML構造に合わせて調整するまで検索できません。`,
     };
   }
 }

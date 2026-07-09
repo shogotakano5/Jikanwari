@@ -56,7 +56,7 @@ export interface Course {
    */
   categoryKey?: CategoryKey;
   categoryGroup?: string; // e.g. 選択必修グループ名 "選択必修A"
-  source: "scraped" | "demo";
+  source: "scraped";
   syllabusUrl?: string;
   cachedAt: number;
   offeredYears?: number[]; // 開講年度 (来年度開講のみ, etc.) — undefined = every year

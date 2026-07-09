@@ -1,10 +1,9 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { Course, TimetableEntry, CompletedCourse, FavoriteEntry, Settings } from "@/types";
-import { DEMO_COURSES } from "./demo-courses";
 import { fetchRealCourseSeed } from "./real-course-import";
 
 const DB_NAME = "jikanwari";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 interface JikanwariDB extends DBSchema {
   courses: {
@@ -73,7 +72,9 @@ export function getDB(): Promise<IDBPDatabase<JikanwariDB>> {
         }
         // v2->v3: 実データ(asahikawa-courses-2026.json)をシードするため、
         // デモデータのみで初期化済みのcoursesストアを再投入対象にする。
-        if (oldVersion < 3 && oldVersion > 0) {
+        // v3->v4: デモデータへのフォールバックを完全に廃止したため、v3時点で
+        // デモデータのまま残っている可能性のあるcoursesストアを再投入対象にする。
+        if (oldVersion < 4 && oldVersion > 0) {
           db.clear("courses");
         }
       },
@@ -88,21 +89,26 @@ export function getDB(): Promise<IDBPDatabase<JikanwariDB>> {
 async function seedIfEmpty(db: IDBPDatabase<JikanwariDB>) {
   const count = await db.count("courses");
   if (count === 0) {
-    let seed: Course[];
-    let syncNote: string;
+    // 実データの取得に失敗した場合はcoursesストアを空のままにしておく
+    // （フェイクデータで埋めない）。countが0のままなので次回起動時に再度取得を試みる。
     try {
-      seed = await fetchRealCourseSeed();
-      syncNote = `実データ ${seed.length}件を読み込み済み（${new Date().toLocaleDateString("ja-JP")}）`;
-    } catch {
-      seed = DEMO_COURSES;
-      syncNote = "実データの取得に失敗したためデモデータを使用しています";
-    }
-    const tx = db.transaction("courses", "readwrite");
-    await Promise.all(seed.map((c) => tx.store.put(c)));
-    await tx.done;
+      const seed = await fetchRealCourseSeed();
+      const tx = db.transaction("courses", "readwrite");
+      await Promise.all(seed.map((c) => tx.store.put(c)));
+      await tx.done;
 
-    const settings = (await db.get("settings", DEFAULT_SETTINGS.id)) ?? DEFAULT_SETTINGS;
-    await db.put("settings", { ...settings, lastSyllabusSyncNote: syncNote });
+      const settings = (await db.get("settings", DEFAULT_SETTINGS.id)) ?? DEFAULT_SETTINGS;
+      await db.put("settings", {
+        ...settings,
+        lastSyllabusSyncNote: `実データ ${seed.length}件を読み込み済み（${new Date().toLocaleDateString("ja-JP")}）`,
+      });
+    } catch {
+      const settings = (await db.get("settings", DEFAULT_SETTINGS.id)) ?? DEFAULT_SETTINGS;
+      await db.put("settings", {
+        ...settings,
+        lastSyllabusSyncNote: "初期科目データの取得に失敗しました。ページを再読み込みしてください。",
+      });
+    }
     return;
   }
   const settings = await db.get("settings", DEFAULT_SETTINGS.id);

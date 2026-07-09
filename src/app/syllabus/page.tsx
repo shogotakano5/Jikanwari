@@ -51,7 +51,7 @@ export default function SyllabusSearchPage() {
     try {
       const res = await fetch(`/api/syllabus/search?q=${encodeURIComponent(query)}`);
       if (!res.ok) throw new Error(`検索リクエストに失敗しました (HTTP ${res.status})`);
-      const data: { courses: Course[]; source: "scraped" | "demo"; warning?: string } = await res.json();
+      const data: { courses: Course[]; warning?: string } = await res.json();
       setRemoteResults(data.courses);
       if (data.warning) setWarning(data.warning);
       if (data.courses.length > 0) {

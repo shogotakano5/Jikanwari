@@ -65,9 +65,7 @@ export default function CourseCard({
       <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500">
         {course.room && <span className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">{course.room}</span>}
         {course.textbook && <span className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">教科書: {course.textbook}</span>}
-        <span className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">
-          {course.source === "scraped" ? "大学サイト取得" : "デモデータ"}
-        </span>
+        <span className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">大学サイト取得</span>
         {course.syllabusUrl && (
           <a
             href={course.syllabusUrl}
