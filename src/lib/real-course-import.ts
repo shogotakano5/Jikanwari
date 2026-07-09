@@ -119,8 +119,29 @@ export function mapRawCourseToCourse(raw: RawCourseRecord): Course {
 }
 
 export async function fetchRealCourseSeed(): Promise<Course[]> {
-  const res = await fetch("/data/asahikawa-courses-2026.json");
-  if (!res.ok) throw new Error(`real course data fetch failed: HTTP ${res.status}`);
-  const records: RawCourseRecord[] = await res.json();
-  return records.map(mapRawCourseToCourse);
+  // Load courses from 2026 by default
+  return fetchRealCoursesByYears([2026]);
+}
+
+export async function fetchRealCoursesByYears(years: number[]): Promise<Course[]> {
+  const courses: Course[] = [];
+  const uniqueIds = new Set<string>();
+
+  for (const year of years) {
+    try {
+      const res = await fetch(`/data/asahikawa-courses-${year}.json`);
+      if (!res.ok) continue; // Skip if year file doesn't exist
+      const records: RawCourseRecord[] = await res.json();
+      for (const record of records) {
+        if (!uniqueIds.has(record.id)) {
+          uniqueIds.add(record.id);
+          courses.push(mapRawCourseToCourse(record));
+        }
+      }
+    } catch {
+      // Silently skip years that can't be loaded
+    }
+  }
+
+  return courses;
 }

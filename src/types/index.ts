@@ -116,6 +116,7 @@ export interface Settings {
   displayName?: string;
   theme: "system" | "light" | "dark";
   lastSyllabusSyncNote?: string;
+  loadedSyllabusYears?: number[]; // Track which years' syllabus data have been imported
 }
 
 export interface FavoriteEntry {

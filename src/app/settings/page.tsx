@@ -4,8 +4,11 @@ import { useMemo, useState } from "react";
 import { useAppData } from "@/contexts/AppDataContext";
 import { GRADUATION_REQUIREMENT_SETS, findRequirementSet } from "@/lib/graduation-requirements";
 import { autoPlaceRequiredCoursesEverywhere } from "@/lib/timetable";
+import { fetchRealCoursesByYears } from "@/lib/real-course-import";
 import type { Course } from "@/types";
 import ElectiveRequiredDialog from "@/components/ElectiveRequiredDialog";
+
+const SYLLABUS_YEARS = [2023, 2024, 2025, 2026] as const;
 
 interface SyncResponse {
   courses: Course[];
@@ -22,6 +25,11 @@ export default function SettingsPage() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [autoPlaceMessage, setAutoPlaceMessage] = useState<string | null>(null);
   const [showElectiveDialog, setShowElectiveDialog] = useState(false);
+  const [selectedYears, setSelectedYears] = useState<Set<number>>(
+    new Set(settings.loadedSyllabusYears ?? [2026])
+  );
+  const [loadingYears, setLoadingYears] = useState(false);
+  const [loadYearsMessage, setLoadYearsMessage] = useState<string | null>(null);
 
   const entryYearOptions = Array.from(new Set(GRADUATION_REQUIREMENT_SETS.map((s) => s.entryYearFrom))).sort();
 
@@ -76,6 +84,28 @@ export default function SettingsPage() {
       setSyncMessage(e instanceof Error ? `更新に失敗しました: ${e.message}` : "更新に失敗しました");
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleLoadYears() {
+    setLoadingYears(true);
+    setLoadYearsMessage(null);
+    try {
+      const yearsArray = Array.from(selectedYears).sort();
+      const courses = await fetchRealCoursesByYears(yearsArray);
+      if (courses.length > 0) {
+        await addCourses(courses);
+      }
+      await updateSettings({ ...form, loadedSyllabusYears: yearsArray });
+      setLoadYearsMessage(
+        courses.length > 0
+          ? `${yearsArray.join("・")}年度のシラバスデータを読み込みました（合計${courses.length}科目）。`
+          : "選択された年度のシラバスデータは利用できません。"
+      );
+    } catch (e) {
+      setLoadYearsMessage(e instanceof Error ? `読み込みに失敗しました: ${e.message}` : "読み込みに失敗しました");
+    } finally {
+      setLoadingYears(false);
     }
   }
 
@@ -184,6 +214,42 @@ export default function SettingsPage() {
       </div>
 
       <div className="mt-8 rounded-lg border border-zinc-200 p-3 text-xs text-zinc-500 dark:border-zinc-800">
+        <p className="font-semibold text-zinc-600 dark:text-zinc-400">シラバス年度の選択</p>
+        <p className="mt-1 text-xs">
+          読み込みたいシラバスデータの年度を選択してください。複数年度の科目を同時に表示できます。
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {SYLLABUS_YEARS.map((year) => (
+            <label key={year} className="flex cursor-pointer items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900">
+              <input
+                type="checkbox"
+                checked={selectedYears.has(year)}
+                onChange={(e) => {
+                  const newYears = new Set(selectedYears);
+                  if (e.target.checked) {
+                    newYears.add(year);
+                  } else {
+                    newYears.delete(year);
+                  }
+                  setSelectedYears(newYears);
+                }}
+                className="cursor-pointer"
+              />
+              <span className="text-sm">{year}年度</span>
+            </label>
+          ))}
+        </div>
+        <button
+          onClick={handleLoadYears}
+          disabled={loadingYears || selectedYears.size === 0}
+          className="mt-3 rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-700"
+        >
+          {loadingYears ? "読み込み中..." : "シラバスデータを読み込む"}
+        </button>
+        {loadYearsMessage && <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">{loadYearsMessage}</p>}
+      </div>
+
+      <div className="mt-4 rounded-lg border border-zinc-200 p-3 text-xs text-zinc-500 dark:border-zinc-800">
         <p className="font-semibold text-zinc-600 dark:text-zinc-400">データについて</p>
         <p className="mt-1">
           時間割・シラバス・履修状況・お気に入り・設定はすべてこの端末のブラウザ内（IndexedDB）に保存され、サーバーには送信されません。
