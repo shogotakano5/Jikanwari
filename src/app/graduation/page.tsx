@@ -9,8 +9,8 @@ export default function GraduationPage() {
   const { settings, completed, courseById, courses, clearCourseStatus } = useAppData();
 
   const requirementSet = useMemo(
-    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department),
-    [settings.entryYear, settings.faculty, settings.department]
+    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department, settings.selectedCourse),
+    [settings.entryYear, settings.faculty, settings.department, settings.selectedCourse]
   );
 
   const judgement = useMemo(() => {

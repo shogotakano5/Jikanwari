@@ -17,8 +17,8 @@ export default function TimetableGrid() {
   const [autoPlaceMessage, setAutoPlaceMessage] = useState<string | null>(null);
 
   const requirementSet = useMemo(
-    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department),
-    [settings.entryYear, settings.faculty, settings.department]
+    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department, settings.selectedCourse),
+    [settings.entryYear, settings.faculty, settings.department, settings.selectedCourse]
   );
 
   const scopedTimetable = useMemo(

@@ -15,6 +15,14 @@ export type Grade = (typeof GRADES)[number];
 export type CategoryKey = "必修" | "選択必修" | "選択" | "自由選択";
 
 /**
+ * 経済学部経営経済学科の2年次以降のコース選択。入学年度によってコース名の
+ * 表記が異なる(2023〜2025年度: 経済学/経営・法学/会計・商学コース、
+ * 2026年度以降: 経済学/経営学/会計学コース)ため、年度非依存の内部キーとして
+ * 保持し、表示名は`trackLabel()`(src/lib/graduation-requirements.ts)で解決する。
+ */
+export type Track = "economics" | "management" | "accounting";
+
+/**
  * 必修/選択必修等の履修区分(mandatory-ness)とは別軸の科目群分類。
  * 入学年度によって判定方法が異なるため、Courseの静的フィールドとしては
  * 持たず、`getSubjectGroup(course, entryYear)`(src/lib/subject-group.ts)で
@@ -120,7 +128,7 @@ export interface Settings {
   theme: "system" | "light" | "dark";
   lastSyllabusSyncNote?: string;
   loadedSyllabusYears?: number[]; // Track which years' syllabus data have been imported
-  selectedCourse?: string; // Selected course/track within the department (e.g., "標準履修コース", "高度専門コース", etc.)
+  selectedCourse?: Track; // 2年次以降に所属するコース（未選択の場合はeconomicsを既定値として扱う）
 }
 
 export interface FavoriteEntry {

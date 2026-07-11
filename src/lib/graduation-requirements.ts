@@ -1,117 +1,286 @@
-import type { Course, CompletedCourse, GraduationRequirementSet, RequirementCategory, CourseStatus } from "@/types";
+import type { Course, CompletedCourse, GraduationRequirementSet, RequirementCategory, CourseStatus, Track } from "@/types";
 
 /**
- * 経済学部経営経済学科 卒業要件（入学年度別）。
+ * 経済学部経営経済学科 卒業要件（入学年度・コース別）。
  *
- * ユーザー提供の参考実装（学生便覧ベースで作成されたと思われるプロトタイプ）の
- * 区分構成・必修科目名・単位数をそのまま採用している:
- *   総取得単位124 = 必修20 + 選択必修A〜E(各8=40) + 選択44 + 自由選択20
- * 2023〜2026年度入学まで同一の値だったため、年度が変わっても要件が変わらない
- * 可能性もあるが、本アプリの卒業判定は入学年度別にセットを引く設計を維持し、
- * 学生便覧の改定が確認され次第、年度ごとに数値を差し替えられるようにしてある。
- * 数値の最終確認は学生便覧（https://www.asahikawa-u.ac.jp/student-guide/）で行うこと。
+ * 2023〜2025年度入学者(旧カリキュラム)と2026年度入学者以降(新カリキュラム)とで
+ * 科目ナンバリング体系・卒業要件の区分構成そのものが異なるため、入学年度で
+ * 判定ロジックを分ける。さらにどちらの年度も2年次以降に3コース
+ * (経済学/経営(・法学)/会計(・商学))のいずれかに所属し、選択必修A〜Eの
+ * 対象科目がコースごとに異なるため、コースも判定条件に含める。
+ *
+ * 出典:
+ * - 2023〜2025年度入学者: 2024年度履修ガイド P.20-22
+ *   「経営経済学科 コース別の卒業要件」表（科目ナンバリングのコード表：
+ *   ＥＣ１＝総合科目・ＥＣ２〜７＝基幹科目・ＥＣ８＝教職課程科目、を含む）。
+ *   2023年度・2025年度履修ガイドでも基幹科目群特論の科目名・単位数の構成が
+ *   同一であることを確認済み。
+ * - 2026年度入学者以降: 2026年度履修ガイド P.9, P.24-25
+ *   「経営経済学科 コース別の卒業要件」表。
  */
 
-// 必修科目（参考実装のrequiredCourseNamesをそのまま採用）
-const REQUIRED_COURSE_NAMES = [
-  "経済学(経済)",
-  "理論経済学入門",
-  "経営学Ⅰ",
-  "経営学Ⅱ",
-  "簿記原理Ⅰ",
-  "簿記原理Ⅱ",
-  "会計学Ⅰ",
-  "会計学Ⅱ",
-  "情報処理Ⅰa",
-  "情報処理Ⅰb",
-  "キャリア形成論",
+const ELECTIVE_KEYS = ["A", "B", "C", "D", "E"] as const;
+type ElectiveKey = (typeof ELECTIVE_KEYS)[number];
+
+export const TRACK_OPTIONS: { value: Track; legacyLabel: string; currentLabel: string }[] = [
+  { value: "economics", legacyLabel: "経済学コース", currentLabel: "経済学コース" },
+  { value: "management", legacyLabel: "経営・法学コース", currentLabel: "経営学コース" },
+  { value: "accounting", legacyLabel: "会計・商学コース", currentLabel: "会計学コース" },
 ];
 
-// 選択必修A〜Eの自動分類ルール（科目名の部分一致・参考実装のrequirementBucketをそのまま採用）
-const ELECTIVE_REQUIRED_PATTERNS: Record<"A" | "B" | "C" | "D" | "E", string> = {
-  A: "マクロ|ミクロ|理論|経済学史|日本経済史|西洋経済史",
-  B: "国際|地域|北海道|農業|労働|政策|社会保障|経済地理",
-  C: "経営|企業|組織|人的資源|キャリア",
-  D: "会計|簿記|財務|原価|商品|マーチャン",
-  E: "法|憲法|民法|行政法|情報|数学|地理|地誌|倫理|異文化|総合",
+function isLegacyCurriculum(entryYear: number): boolean {
+  return entryYear <= 2025;
+}
+
+export function trackLabel(track: Track, entryYear: number): string {
+  const option = TRACK_OPTIONS.find((o) => o.value === track) ?? TRACK_OPTIONS[0];
+  return isLegacyCurriculum(entryYear) ? option.legacyLabel : option.currentLabel;
+}
+
+// ---- 2023〜2025年度入学者（旧カリキュラム） ----
+const LEGACY_REQUIRED_GENERAL = ["英語Ⅰ", "英語Ⅱ", "数学Ⅰ", "情報処理Ⅰ", "情報処理Ⅱ", "ゼミナールⅠ", "キャリア形成論"];
+const LEGACY_ELECTIVE_REQUIRED_LANGUAGE = [
+  "英語Ⅲ",
+  "英語Ⅳ",
+  "ロシア語Ⅰ",
+  "ロシア語Ⅱ",
+  "中国語Ⅰ",
+  "中国語Ⅱ",
+  "ドイツ語Ⅰ",
+  "ドイツ語Ⅱ",
+  "ハングルⅠ",
+  "ハングルⅡ",
+];
+const LEGACY_REQUIRED_PROFESSIONAL = ["経済学Ⅰ", "経済学Ⅱ", "ゼミナールⅡ", "ゼミナールⅢ", "ゼミナールⅣ"];
+
+const LEGACY_ELECTIVE_GROUPS: Record<Track, Record<ElectiveKey, string[]>> = {
+  economics: {
+    A: ["マクロ経済学Ⅰ", "マクロ経済学Ⅱ", "ミクロ経済学Ⅰ", "ミクロ経済学Ⅱ"],
+    B: ["経済原論Ⅰ", "経済原論Ⅱ", "経済学史Ⅰ", "経済学史Ⅱ"],
+    C: ["日本経済史Ⅰ", "日本経済史Ⅱ", "西洋経済史Ⅰ", "西洋経済史Ⅱ"],
+    D: ["国際経済論Ⅰ", "国際経済論Ⅱ", "北海道経済論", "あさひかわ学"],
+    E: [
+      "経営学Ⅰ",
+      "経営学Ⅱ",
+      "人的資源管理論Ⅰ",
+      "人的資源管理論Ⅱ",
+      "民法Ⅰ（物権法）",
+      "民法Ⅱ（契約法）",
+      "会社法Ⅰ",
+      "会社法Ⅱ",
+      "簿記原理Ⅰ",
+      "簿記原理Ⅱ",
+      "簿記原理Ⅲ",
+      "会計学",
+      "会計基準論",
+      "マーケティング論Ⅰ",
+      "マーケティング論Ⅱ",
+    ],
+  },
+  management: {
+    A: ["マクロ経済学Ⅰ", "マクロ経済学Ⅱ", "ミクロ経済学Ⅰ", "ミクロ経済学Ⅱ", "経済原論Ⅰ", "経済原論Ⅱ", "経済学史Ⅰ", "経済学史Ⅱ"],
+    B: ["日本経済史Ⅰ", "日本経済史Ⅱ", "西洋経済史Ⅰ", "西洋経済史Ⅱ", "国際経済論Ⅰ", "国際経済論Ⅱ", "北海道経済論", "あさひかわ学"],
+    C: ["経営学Ⅰ", "経営学Ⅱ", "人的資源管理論Ⅰ", "人的資源管理論Ⅱ"],
+    D: ["民法Ⅰ（物権法）", "民法Ⅱ（契約法）", "会社法Ⅰ", "会社法Ⅱ", "行政法Ⅰ（作用法）", "行政法Ⅱ（救済法）"],
+    E: ["簿記原理Ⅰ", "簿記原理Ⅱ", "簿記原理Ⅲ", "会計学", "会計基準論", "商品流通論", "マーチャンダイジング論", "マーケティング論Ⅰ", "マーケティング論Ⅱ"],
+  },
+  accounting: {
+    A: ["マクロ経済学Ⅰ", "マクロ経済学Ⅱ", "ミクロ経済学Ⅰ", "ミクロ経済学Ⅱ", "経済原論Ⅰ", "経済原論Ⅱ", "経済学史Ⅰ", "経済学史Ⅱ"],
+    B: ["日本経済史Ⅰ", "日本経済史Ⅱ", "西洋経済史Ⅰ", "西洋経済史Ⅱ"],
+    C: ["経営学Ⅰ", "経営学Ⅱ", "人的資源管理論Ⅰ", "人的資源管理論Ⅱ", "民法Ⅰ（物権法）", "民法Ⅱ（契約法）", "会社法Ⅰ", "会社法Ⅱ"],
+    D: ["簿記原理Ⅰ", "簿記原理Ⅱ", "簿記原理Ⅲ", "財務会計Ⅰ", "財務会計Ⅱ", "財務会計Ⅲ"],
+    E: ["会計学", "会計基準論", "商品流通論", "マーチャンダイジング論", "マーケティング論Ⅰ", "マーケティング論Ⅱ", "金融論"],
+  },
 };
 
-function electiveRequiredCategories(): RequirementCategory[] {
-  return (Object.keys(ELECTIVE_REQUIRED_PATTERNS) as Array<keyof typeof ELECTIVE_REQUIRED_PATTERNS>).map((k) => ({
-    key: `選択必修${k}`,
-    label: "選択必修",
-    groupLabel: `選択必修${k}`,
-    requiredCredits: 8,
-    matchPattern: ELECTIVE_REQUIRED_PATTERNS[k],
+// ---- 2026年度入学者以降（新カリキュラム） ----
+const CURRENT_REQUIRED_GENERAL = [
+  "地域社会学",
+  "あさひかわ学",
+  "アカデミック・スキルズ",
+  "数理・データサイエンス",
+  "EnglishCommunicationⅠ",
+  "EnglishCommunicationⅡ",
+  "数学",
+  "経済学",
+  "EnglishCommunicationⅢ",
+  "情報処理Ⅰ",
+];
+const CURRENT_REQUIRED_PROFESSIONAL = ["理論経済学入門", "人文・社会科学演習", "専門演習Ⅰ", "専門演習Ⅱ", "卒業論文"];
+
+const CURRENT_ELECTIVE_GROUPS: Record<Track, Record<ElectiveKey, string[]>> = {
+  economics: {
+    A: ["マクロ経済学Ⅰ", "マクロ経済学Ⅱ", "ミクロ経済学Ⅰ", "ミクロ経済学Ⅱ", "経済数学", "計量経済学"],
+    B: ["北海道経済論", "農業経済論Ⅰ", "農業経済論Ⅱ", "労働経済論", "労働政策論"],
+    C: ["経済学史Ⅰ", "経済学史Ⅱ", "日本経済史Ⅰ", "日本経済史Ⅱ", "西洋経済史Ⅰ", "西洋経済史Ⅱ"],
+    D: ["国際経済論Ⅰ", "国際経済論Ⅱ", "開発経済論Ⅰ", "開発経済論Ⅱ", "金融論", "財政論"],
+    E: [
+      "経営学Ⅰ",
+      "経営学Ⅱ",
+      "人的資源管理論Ⅰ",
+      "人的資源管理論Ⅱ",
+      "会社法Ⅰ",
+      "会社法Ⅱ",
+      "マーケティング論Ⅰ",
+      "マーケティング論Ⅱ",
+      "民法Ⅰ（総則）",
+      "民法Ⅱ（物権）",
+      "民法Ⅲ（契約）",
+      "簿記原理Ⅰ",
+      "簿記原理Ⅱ",
+      "会計学Ⅰ",
+      "会計学Ⅱ",
+    ],
+  },
+  management: {
+    A: ["経営学Ⅰ", "経営学Ⅱ", "現代企業論Ⅰ", "現代企業論Ⅱ", "会社法Ⅰ", "会社法Ⅱ"],
+    B: ["経営組織論Ⅰ", "経営組織論Ⅱ", "人的資源管理論Ⅰ", "人的資源管理論Ⅱ", "労働法Ⅰ", "労働法Ⅱ"],
+    C: ["流通論Ⅰ", "流通論Ⅱ", "マーケティング論Ⅰ", "マーケティング論Ⅱ", "民法Ⅲ（契約）"],
+    D: ["簿記原理Ⅰ", "簿記原理Ⅱ", "財務会計Ⅰ", "財務会計Ⅱ", "会計学Ⅰ", "会計学Ⅱ"],
+    E: [
+      "マクロ経済学Ⅰ",
+      "マクロ経済学Ⅱ",
+      "ミクロ経済学Ⅰ",
+      "ミクロ経済学Ⅱ",
+      "経済学史Ⅰ",
+      "経済学史Ⅱ",
+      "日本経済史Ⅰ",
+      "日本経済史Ⅱ",
+      "西洋経済史Ⅰ",
+      "西洋経済史Ⅱ",
+      "国際経済論Ⅰ",
+      "国際経済論Ⅱ",
+      "北海道経済論",
+      "金融論",
+      "財政論",
+    ],
+  },
+  accounting: {
+    A: ["簿記原理Ⅰ", "簿記原理Ⅱ", "会計学Ⅰ", "会計学Ⅱ"],
+    B: ["税法Ⅰ（総論）", "税法Ⅱ（事例研究）", "財務会計Ⅰ", "財務会計Ⅱ"],
+    C: ["会社法Ⅰ", "会社法Ⅱ", "民法Ⅰ（総則）", "民法Ⅱ（物権）", "民法Ⅲ（契約）"],
+    D: ["経営学Ⅰ", "経営学Ⅱ", "人的資源管理論Ⅰ", "人的資源管理論Ⅱ", "流通論Ⅰ", "流通論Ⅱ", "マーケティング論Ⅰ", "マーケティング論Ⅱ"],
+    E: [
+      "マクロ経済学Ⅰ",
+      "マクロ経済学Ⅱ",
+      "ミクロ経済学Ⅰ",
+      "ミクロ経済学Ⅱ",
+      "経済学史Ⅰ",
+      "経済学史Ⅱ",
+      "日本経済史Ⅰ",
+      "日本経済史Ⅱ",
+      "西洋経済史Ⅰ",
+      "西洋経済史Ⅱ",
+      "国際経済論Ⅰ",
+      "国際経済論Ⅱ",
+      "北海道経済論",
+      "金融論",
+      "財政論",
+    ],
+  },
+};
+
+const GENERAL_ELECTIVE_KEY = "全学共通選択";
+const PROFESSIONAL_ELECTIVE_KEY = "専門選択";
+
+function electiveRequiredCategories(track: Track, entryYear: number): RequirementCategory[] {
+  const groups = isLegacyCurriculum(entryYear) ? LEGACY_ELECTIVE_GROUPS[track] : CURRENT_ELECTIVE_GROUPS[track];
+  return ELECTIVE_KEYS.map((k) => ({
+    key: `専門選択必修${k}`,
+    label: "選択必修" as const,
+    groupLabel: `専門 選択必修${k}`,
+    requiredCredits: 4,
+    matchNames: groups[k],
   }));
 }
 
-function baseCategories(): RequirementCategory[] {
+function buildCategories(entryYear: number, track: Track): RequirementCategory[] {
+  if (isLegacyCurriculum(entryYear)) {
+    return [
+      { key: "全学共通必修", label: "必修", groupLabel: "全学共通・一般 必修", requiredCredits: 16, matchNames: LEGACY_REQUIRED_GENERAL },
+      {
+        key: "全学共通選択必修",
+        label: "選択必修",
+        groupLabel: "全学共通・一般 選択必修（外国語）",
+        requiredCredits: 4,
+        matchNames: LEGACY_ELECTIVE_REQUIRED_LANGUAGE,
+      },
+      { key: GENERAL_ELECTIVE_KEY, label: "選択", groupLabel: "全学共通・一般 選択", requiredCredits: 24 },
+      { key: "専門必修", label: "必修", groupLabel: "専門 必修", requiredCredits: 16, matchNames: LEGACY_REQUIRED_PROFESSIONAL },
+      ...electiveRequiredCategories(track, entryYear),
+      { key: PROFESSIONAL_ELECTIVE_KEY, label: "選択", groupLabel: "専門 選択", requiredCredits: 44 },
+    ];
+  }
   return [
-    { key: "必修", label: "必修", requiredCredits: 20, matchNames: REQUIRED_COURSE_NAMES },
-    ...electiveRequiredCategories(),
-    { key: "選択", label: "選択", requiredCredits: 44 },
-    { key: "自由選択", label: "自由選択", requiredCredits: 20 },
+    { key: "全学共通必修", label: "必修", groupLabel: "全学共通・一般 必修", requiredCredits: 16, matchNames: CURRENT_REQUIRED_GENERAL },
+    { key: GENERAL_ELECTIVE_KEY, label: "選択", groupLabel: "全学共通・一般 選択", requiredCredits: 28 },
+    { key: "専門必修", label: "必修", groupLabel: "専門 必修", requiredCredits: 16, matchNames: CURRENT_REQUIRED_PROFESSIONAL },
+    ...electiveRequiredCategories(track, entryYear),
+    { key: PROFESSIONAL_ELECTIVE_KEY, label: "選択", groupLabel: "専門 選択", requiredCredits: 44 },
   ];
 }
 
-export const GRADUATION_REQUIREMENT_SETS: GraduationRequirementSet[] = [2023, 2024, 2025, 2026].map((year) => ({
-  id: `keiei-keizai-${year}`,
-  entryYearFrom: year,
-  entryYearTo: year,
-  faculty: "経済学部",
-  department: "経営経済学科",
-  totalCreditsRequired: 124,
-  note: `${year}年度入学者向けカリキュラム（要・学生便覧突合）`,
-  categories: baseCategories(),
-}));
+export const SUPPORTED_ENTRY_YEARS = [2023, 2024, 2025, 2026] as const;
 
-export function findRequirementSet(entryYear: number, faculty: string, department: string): GraduationRequirementSet | undefined {
-  return (
-    GRADUATION_REQUIREMENT_SETS.find(
-      (set) =>
-        entryYear >= set.entryYearFrom &&
-        entryYear <= set.entryYearTo &&
-        set.faculty === faculty &&
-        set.department === department
-    ) ??
-    // フォールバック: 完全一致がなければ直近の学部一致セットを使う
-    GRADUATION_REQUIREMENT_SETS.filter((s) => s.faculty === faculty && s.department === department).sort(
-      (a, b) => b.entryYearFrom - a.entryYearFrom
-    )[0]
-  );
+/**
+ * 入学年度・学部・学科・所属コースから卒業要件セットを組み立てる。
+ * 対応する学部・学科は現状「経済学部経営経済学科」のみ。定義済み年度範囲外
+ * (将来入学者等)は直近の年度の要件にフォールバックする。
+ */
+export function findRequirementSet(
+  entryYear: number,
+  faculty: string,
+  department: string,
+  track: Track = "economics"
+): GraduationRequirementSet | undefined {
+  if (faculty !== "経済学部" || department !== "経営経済学科") return undefined;
+  const year = Math.min(2026, Math.max(2023, entryYear));
+  return {
+    id: `keiei-keizai-${year}-${track}`,
+    entryYearFrom: year,
+    entryYearTo: year,
+    faculty,
+    department,
+    totalCreditsRequired: 124,
+    note: `${year}年度入学者向けカリキュラム・${trackLabel(track, year)}（出典: ${year <= 2025 ? "2024" : "2026"}年度履修ガイド）`,
+    categories: buildCategories(year, track),
+  };
 }
 
 /**
  * 科目がどの卒業要件区分としてカウントされるかを判定する。
  * 1. 科目に手動で区分(categoryKey/categoryGroup)が設定されていればそれを優先
  * 2. 必修科目名リストに完全一致すれば必修
- * 3. 選択必修A〜Eの科目名パターンに部分一致すればそのグループ
- * 4. 自由選択が明示されていれば自由選択
- * 5. それ以外はすべて「選択」
+ * 3. 選択必修A〜Eの科目名リストに完全一致すればそのグループ
+ * 4. それ以外はすべて「専門 選択」とする
+ *    （現在搭載している実データ130科目はすべて専門科目のため。全学共通・
+ *    一般教育科目のデータが搭載されれば、そちらの判定も別途必要になる）
  */
 export function classifyCourse(course: Course, requirementSet: GraduationRequirementSet): RequirementCategory {
   if (course.categoryKey === "必修") {
-    const req = requirementSet.categories.find((c) => c.label === "必修");
+    const req = requirementSet.categories.find((c) => c.label === "必修" && c.key === "専門必修");
     if (req) return req;
   }
   if (course.categoryKey === "選択必修" && course.categoryGroup) {
     const req = requirementSet.categories.find((c) => c.groupLabel === course.categoryGroup);
     if (req) return req;
   }
-  if (course.categoryKey === "自由選択") {
-    const req = requirementSet.categories.find((c) => c.label === "自由選択");
-    if (req) return req;
-  }
 
-  const required = requirementSet.categories.find((c) => c.label === "必修");
-  if (required?.matchNames?.includes(course.name)) return required;
+  const requiredGeneral = requirementSet.categories.find((c) => c.key === "全学共通必修");
+  if (requiredGeneral?.matchNames?.includes(course.name)) return requiredGeneral;
+  const requiredProfessional = requirementSet.categories.find((c) => c.key === "専門必修");
+  if (requiredProfessional?.matchNames?.includes(course.name)) return requiredProfessional;
+  const electiveRequiredLanguage = requirementSet.categories.find((c) => c.key === "全学共通選択必修");
+  if (electiveRequiredLanguage?.matchNames?.includes(course.name)) return electiveRequiredLanguage;
 
   for (const cat of requirementSet.categories) {
-    if (cat.matchPattern && new RegExp(cat.matchPattern).test(course.name)) return cat;
+    if (cat.matchNames?.includes(course.name) && cat.key.startsWith("専門選択必修")) return cat;
   }
 
-  return requirementSet.categories.find((c) => c.label === "選択") ?? requirementSet.categories[requirementSet.categories.length - 1];
+  return (
+    requirementSet.categories.find((c) => c.key === PROFESSIONAL_ELECTIVE_KEY) ??
+    requirementSet.categories[requirementSet.categories.length - 1]
+  );
 }
 
 export interface CategoryProgress extends RequirementCategory {

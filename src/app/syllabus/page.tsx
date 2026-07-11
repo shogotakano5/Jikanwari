@@ -22,8 +22,8 @@ export default function SyllabusSearchPage() {
   const [error, setError] = useState<string | null>(null);
 
   const requirementSet = useMemo(
-    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department),
-    [settings.entryYear, settings.faculty, settings.department]
+    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department, settings.selectedCourse),
+    [settings.entryYear, settings.faculty, settings.department, settings.selectedCourse]
   );
 
   const favoriteIds = useMemo(() => new Set(favorites.map((f) => f.courseId)), [favorites]);
@@ -136,9 +136,7 @@ export default function SyllabusSearchPage() {
       )}
 
       <div className="mt-4 flex flex-col gap-3 pb-8">
-        {query.trim().length === 0 ? (
-          <p className="py-8 text-center text-sm text-zinc-400">検索語を入力してください</p>
-        ) : results.length === 0 && !loading ? (
+        {results.length === 0 && !loading ? (
           <p className="py-8 text-center text-sm text-zinc-400">該当する科目が見つかりませんでした</p>
         ) : (
           results.map((course) => (

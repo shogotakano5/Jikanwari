@@ -12,8 +12,8 @@ export default function FavoritesPage() {
     useAppData();
 
   const requirementSet = useMemo(
-    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department),
-    [settings.entryYear, settings.faculty, settings.department]
+    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department, settings.selectedCourse),
+    [settings.entryYear, settings.faculty, settings.department, settings.selectedCourse]
   );
 
   const favoriteCourses = favorites

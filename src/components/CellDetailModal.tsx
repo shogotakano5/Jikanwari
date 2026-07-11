@@ -36,8 +36,8 @@ export default function CellDetailModal({ grade, term, day, period, onClose }: P
   const [showManualDialog, setShowManualDialog] = useState(false);
 
   const requirementSet = useMemo(
-    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department),
-    [settings.entryYear, settings.faculty, settings.department]
+    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department, settings.selectedCourse),
+    [settings.entryYear, settings.faculty, settings.department, settings.selectedCourse]
   );
 
   const slotId = timetableSlotId(grade, term, day, period);

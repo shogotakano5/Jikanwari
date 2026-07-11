@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useAppData } from "@/contexts/AppDataContext";
-import { GRADUATION_REQUIREMENT_SETS, findRequirementSet } from "@/lib/graduation-requirements";
+import { SUPPORTED_ENTRY_YEARS, findRequirementSet, TRACK_OPTIONS, trackLabel } from "@/lib/graduation-requirements";
 import { autoPlaceRequiredCoursesEverywhere } from "@/lib/timetable";
 import { fetchRealCoursesByYears } from "@/lib/real-course-import";
 import type { Course } from "@/types";
@@ -31,13 +31,13 @@ export default function SettingsPage() {
   const [loadingYears, setLoadingYears] = useState(false);
   const [loadYearsMessage, setLoadYearsMessage] = useState<string | null>(null);
 
-  const entryYearOptions = Array.from(new Set(GRADUATION_REQUIREMENT_SETS.map((s) => s.entryYearFrom))).sort();
+  const entryYearOptions = SUPPORTED_ENTRY_YEARS;
 
-  // 入学年度・学部・学科を選ぶと、対応する履修ガイド（卒業要件セット）を
+  // 入学年度・学部・学科・コースを選ぶと、対応する履修ガイド（卒業要件セット）を
   // 保存する前にその場でプレビューできる。
   const previewRequirementSet = useMemo(
-    () => findRequirementSet(form.entryYear, form.faculty, form.department),
-    [form.entryYear, form.faculty, form.department]
+    () => findRequirementSet(form.entryYear, form.faculty, form.department, form.selectedCourse),
+    [form.entryYear, form.faculty, form.department, form.selectedCourse]
   );
 
   const syllabusYears = useMemo(
@@ -52,7 +52,7 @@ export default function SettingsPage() {
 
     // Ver.11方針: 必修科目は学生が選ぶものではないため、履修ガイドが決まったら
     // 全学年・全学期にデフォルトで自動配置する。
-    const requirementSet = findRequirementSet(form.entryYear, form.faculty, form.department);
+    const requirementSet = findRequirementSet(form.entryYear, form.faculty, form.department, form.selectedCourse);
     if (requirementSet) {
       const { placed, skipped } = await autoPlaceRequiredCoursesEverywhere(courses, timetable, requirementSet, assignToTimetable);
       setAutoPlaceMessage(
@@ -151,15 +151,21 @@ export default function SettingsPage() {
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          履修コース（任意）
-          <input
-            placeholder="例: 標準コース、高度専門コース等"
-            value={form.selectedCourse ?? ""}
-            onChange={(e) => setForm({ ...form, selectedCourse: e.target.value })}
+          履修コース（2年次以降に所属）
+          <select
+            value={form.selectedCourse ?? "economics"}
+            onChange={(e) => setForm({ ...form, selectedCourse: e.target.value as typeof form.selectedCourse })}
             className="rounded-lg border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
-          />
+          >
+            {TRACK_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {trackLabel(opt.value, form.entryYear)}
+              </option>
+            ))}
+          </select>
           <p className="text-xs text-zinc-500">
-            履修ガイドに複数のコース・トラックがある場合、ここで選択すると卒業判定に反映されます（将来実装予定）。
+            選択必修A〜Eの対象科目はコースごとに異なります。1年次はどのコースでも卒業要件に大きな差はありませんが、
+            2年次以降の所属コースが決まったらここで選び直してください。
           </p>
         </label>
 

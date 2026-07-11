@@ -40,6 +40,7 @@ export const DEFAULT_SETTINGS: Settings = {
   entryYear: 2024,
   faculty: "経済学部",
   department: "経営経済学科",
+  selectedCourse: "economics",
   theme: "system",
 };
 

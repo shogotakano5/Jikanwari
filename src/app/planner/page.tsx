@@ -19,8 +19,8 @@ export default function PlannerPage() {
   const [showElectiveDialog, setShowElectiveDialog] = useState(false);
 
   const requirementSet = useMemo(
-    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department),
-    [settings.entryYear, settings.faculty, settings.department]
+    () => findRequirementSet(settings.entryYear, settings.faculty, settings.department, settings.selectedCourse),
+    [settings.entryYear, settings.faculty, settings.department, settings.selectedCourse]
   );
 
   const judgement = useMemo(() => {
