@@ -3,6 +3,9 @@ import { normalizeQuery } from "./search";
 import {
   scrapeAllEconomicsCourses,
   scrapeCampusCourseWithDetail,
+  loginToCampusWeb,
+  CampusWebAuthError,
+  type CampusWebSession,
 } from "./scraping/asahikawa-scraper";
 import { ASAHIKAWA_SCRAPER_CONFIG, type ScrapedCourse } from "./scraping/scraper-config";
 import { unstable_cache } from "next/cache";
@@ -10,6 +13,7 @@ import { unstable_cache } from "next/cache";
 export interface ScrapeResult {
   courses: Course[];
   warning?: string;
+  authFailed?: boolean;
 }
 
 export interface SyncResult {
@@ -17,6 +21,13 @@ export interface SyncResult {
   queriesAttempted: number;
   queriesFailed: number;
   warning?: string;
+  authFailed?: boolean;
+}
+
+/** ログインID・パスワード。呼び出し元のローカル変数としてのみ受け渡し、保存はしない */
+export interface CampusWebCredentials {
+  userId: string;
+  password: string;
 }
 
 const DAY_MAP: Record<string, Weekday> = { 月: "月", 火: "火", 水: "水", 木: "木", 金: "金", 土: "土" };
@@ -122,9 +133,33 @@ const cachedScrapeByQuery = unstable_cache(
  * （フェイクデータで埋めることはしない）。
  * 成功したデータはさらに呼び出し側（クライアント）がIndexedDBへキャッシュし、
  * 同じブラウザからは以降このAPI自体を呼ばない想定。
+ *
+ * 大学サイトの検索(slbssrch.do)は未ログインで実行するとHTTP 500で弾かれる
+ * （ログイン必須であることを実サイトへの直接アクセスで確認済み）。credentialsが
+ * 渡された場合のみ、その場でログインしてから検索する。ログイン結果のセッション
+ * Cookie・userId・passwordはこの関数のスタック上にのみ存在し、戻り値にも
+ * unstable_cacheのキャッシュにも含めない（サーバー側で一切保存しない）。
  */
-export async function scrapeSyllabus(query: string): Promise<ScrapeResult> {
+export async function scrapeSyllabus(query: string, credentials?: CampusWebCredentials): Promise<ScrapeResult> {
   const normalized = normalizeQuery(query);
+
+  if (credentials) {
+    try {
+      const session = await loginToCampusWeb(credentials.userId, credentials.password);
+      const scraped = await scrapeCampusCourseWithDetail({ subjectName: normalized, limit: 20 }, session);
+      if (scraped.length === 0) throw new Error("no matching courses found");
+      return { courses: scraped.map(mapScrapedCourseToCourse) };
+    } catch (err) {
+      if (err instanceof CampusWebAuthError) {
+        return { courses: [], warning: err.message, authFailed: true };
+      }
+      return {
+        courses: [],
+        warning: `大学シラバスサイトへのライブ検索に失敗しました（${err instanceof Error ? err.message : String(err)}）。`,
+      };
+    }
+  }
+
   try {
     const scraped = await cachedScrapeByQuery(normalized);
     if (scraped.length === 0) throw new Error("no matching courses found");
@@ -134,7 +169,7 @@ export async function scrapeSyllabus(query: string): Promise<ScrapeResult> {
       courses: [],
       warning: `大学シラバスサイトへのライブ検索に失敗しました（${
         err instanceof Error ? err.message : String(err)
-      }）。すでに読み込み済みの130科目以外は、大学サイトへ到達できる環境で src/lib/scraping/scraper-config.ts のフィールド名・セレクタを実構造に合わせて調整するまで検索できません。`,
+      }）。シラバス検索には大学ポータルへのログインが必要です。設定画面でログインID・パスワードを入力してから再度お試しください。`,
     };
   }
 }
@@ -144,14 +179,34 @@ export async function scrapeSyllabus(query: string): Promise<ScrapeResult> {
  * （raw["取得元検索条件"]に "grade1"〜"grade3"/"day1"〜"day5" 等が残っている）を
  * 再現し、学年×曜日ごとに検索して全件を収集する（scrapeAllEconomicsCourses）。
  * 詳細ページまでは取得しない（件数が多く負荷が大きいため、検索結果一覧のみ）。
+ *
+ * credentialsが渡された場合はその場でログインしてから全件取得する
+ * （scrapeSyllabusと同様、認証情報・セッションCookieはサーバー側に保存しない）。
  */
-export async function scrapeAllCourses(): Promise<SyncResult> {
+export async function scrapeAllCourses(credentials?: CampusWebCredentials): Promise<SyncResult> {
   const gradeCount = ASAHIKAWA_SCRAPER_CONFIG.campusWeb.gradeValues.length;
   const dayCount = ASAHIKAWA_SCRAPER_CONFIG.campusWeb.dayValues.length;
   const queriesAttempted = gradeCount * dayCount;
 
+  let session: CampusWebSession | undefined;
+  if (credentials) {
+    try {
+      session = await loginToCampusWeb(credentials.userId, credentials.password);
+    } catch (err) {
+      if (err instanceof CampusWebAuthError) {
+        return { courses: [], queriesAttempted, queriesFailed: queriesAttempted, warning: err.message, authFailed: true };
+      }
+      return {
+        courses: [],
+        queriesAttempted,
+        queriesFailed: queriesAttempted,
+        warning: `大学ポータルへのログインに失敗しました（${err instanceof Error ? err.message : String(err)}）。`,
+      };
+    }
+  }
+
   try {
-    const scraped = await scrapeAllEconomicsCourses();
+    const scraped = await scrapeAllEconomicsCourses(ASAHIKAWA_SCRAPER_CONFIG.campusWeb.defaultYear, session);
     if (scraped.length === 0) throw new Error("no courses returned from any grade/day combination");
     return { courses: scraped.map(mapScrapedCourseToCourse), queriesAttempted, queriesFailed: 0 };
   } catch (err) {
@@ -159,9 +214,11 @@ export async function scrapeAllCourses(): Promise<SyncResult> {
       courses: [],
       queriesAttempted,
       queriesFailed: queriesAttempted,
-      warning: `全件同期に失敗しました（${
-        err instanceof Error ? err.message : String(err)
-      }）。搭載済みの130科目データはそのまま利用できます。大学サイトへ到達できる環境で src/lib/scraping/scraper-config.ts のフィールド名・セレクタを実構造に合わせて調整してください。`,
+      warning: credentials
+        ? `全件同期に失敗しました（${err instanceof Error ? err.message : String(err)}）。搭載済みのデータはそのまま利用できます。`
+        : `全件同期に失敗しました（${
+            err instanceof Error ? err.message : String(err)
+          }）。シラバス検索には大学ポータルへのログインが必要です。設定画面でログインID・パスワードを入力してから再度お試しください。搭載済みの130科目データはそのまま利用できます。`,
     };
   }
 }

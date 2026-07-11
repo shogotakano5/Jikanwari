@@ -53,7 +53,16 @@ export default function SyllabusSearchPage() {
 
     setLoading(true);
     try {
-      const res = await fetch(`/api/syllabus/search?q=${encodeURIComponent(query)}`);
+      // 大学サイトのシラバス検索はログイン必須。設定画面でログインID・パスワードが
+      // 保存されていればPOSTで一緒に送り、その場で自動ログインしてから検索する。
+      const hasCredentials = Boolean(settings.campusUserId && settings.campusPassword);
+      const res = hasCredentials
+        ? await fetch("/api/syllabus/search", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ q: query, userId: settings.campusUserId, password: settings.campusPassword }),
+          })
+        : await fetch(`/api/syllabus/search?q=${encodeURIComponent(query)}`);
       if (!res.ok) throw new Error(`検索リクエストに失敗しました (HTTP ${res.status})`);
       const data: { courses: Course[]; warning?: string } = await res.json();
       setRemoteResults(data.courses);

@@ -129,6 +129,14 @@ export interface Settings {
   lastSyllabusSyncNote?: string;
   loadedSyllabusYears?: number[]; // Track which years' syllabus data have been imported
   selectedCourse?: Track; // 2年次以降に所属するコース（未選択の場合はeconomicsを既定値として扱う）
+  /**
+   * 大学ポータル(Campus-Xs)のログインID・パスワード。シラバス検索は学内認証必須のため、
+   * ここに保存しておくと大学サイトからの取得時に自動でログインする。
+   * この端末のブラウザ内（IndexedDB）にのみ保存され、サーバーへは同期取得リクエストの
+   * たびに一時的に送信されるのみで、サーバー側では一切保存・ログしない。
+   */
+  campusUserId?: string;
+  campusPassword?: string;
 }
 
 export interface FavoriteEntry {

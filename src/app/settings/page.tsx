@@ -30,6 +30,7 @@ export default function SettingsPage() {
   );
   const [loadingYears, setLoadingYears] = useState(false);
   const [loadYearsMessage, setLoadYearsMessage] = useState<string | null>(null);
+  const [credentialsSaved, setCredentialsSaved] = useState(false);
 
   const entryYearOptions = SUPPORTED_ENTRY_YEARS;
 
@@ -64,11 +65,21 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleSaveCredentials() {
+    await updateSettings({ ...settings, campusUserId: form.campusUserId, campusPassword: form.campusPassword });
+    setCredentialsSaved(true);
+    setTimeout(() => setCredentialsSaved(false), 1500);
+  }
+
   async function handleSync() {
     setSyncing(true);
     setSyncMessage(null);
     try {
-      const res = await fetch("/api/syllabus/sync", { method: "POST" });
+      const res = await fetch("/api/syllabus/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: form.campusUserId, password: form.campusPassword }),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: SyncResponse = await res.json();
       if (data.courses.length > 0) {
@@ -269,6 +280,46 @@ export default function SettingsPage() {
       </div>
 
       <div className="mt-4 rounded-lg border border-zinc-200 p-3 text-xs text-zinc-500 dark:border-zinc-800">
+        <p className="font-semibold text-zinc-600 dark:text-zinc-400">大学ポータル（Campus-Xs）ログイン</p>
+        <p className="mt-1">
+          シラバス検索は大学ポータルへのログインが必須です。ここでログインID・パスワードを入力して保存すると、
+          「大学サイトから最新のシラバスを取得する」やシラバス検索のたびに自動でログインしてから取得します。
+        </p>
+        <p className="mt-1 text-zinc-400">
+          この認証情報は<strong className="font-semibold text-zinc-600 dark:text-zinc-300">この端末のブラウザ内（IndexedDB）にのみ保存</strong>されます。
+          取得リクエストのたびにこのアプリ自身のサーバーへ一時的に送信され、大学ポータルへのログインだけに使ったあと即座に破棄されます
+          （サーバー側のデータベース・キャッシュ・ログには一切保存しません）。入力しない場合は従来どおり未ログインでの取得を試みます。
+        </p>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <label className="flex flex-1 flex-col gap-1">
+            ログインID（学籍番号等）
+            <input
+              value={form.campusUserId ?? ""}
+              onChange={(e) => setForm({ ...form, campusUserId: e.target.value })}
+              autoComplete="off"
+              className="rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            パスワード
+            <input
+              type="password"
+              value={form.campusPassword ?? ""}
+              onChange={(e) => setForm({ ...form, campusPassword: e.target.value })}
+              autoComplete="off"
+              className="rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            />
+          </label>
+        </div>
+        <button
+          onClick={handleSaveCredentials}
+          className="mt-3 rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200"
+        >
+          {credentialsSaved ? "保存しました" : "ログイン情報を保存する"}
+        </button>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-zinc-200 p-3 text-xs text-zinc-500 dark:border-zinc-800">
         <p className="font-semibold text-zinc-600 dark:text-zinc-400">データについて</p>
         <p className="mt-1">
           時間割・シラバス・履修状況・お気に入り・設定はすべてこの端末のブラウザ内（IndexedDB）に保存され、サーバーには送信されません。
@@ -284,7 +335,8 @@ export default function SettingsPage() {
         </button>
         {syncMessage && <p className="mt-2 text-zinc-600 dark:text-zinc-300">{syncMessage}</p>}
         <p className="mt-2 text-zinc-400">
-          学年（1〜4年）ごとに検索を行い、搭載済みの科目データへ追加・更新します。大学サイトへ到達できない環境では失敗しますが、既存のデータは失われません。
+          学年（1〜4年）ごとに検索を行い、搭載済みの科目データへ追加・更新します。上でログイン情報を保存していない場合、
+          大学サイトの検索は未ログインでは実行できず失敗します（既存のデータは失われません）。
         </p>
       </div>
 

@@ -63,6 +63,91 @@ function collectSetCookie(headers: Headers): string {
     .join("; ");
 }
 
+/** 複数のCookie文字列("a=1; b=2")を名前ベースでマージし、後勝ちで1本の文字列にまとめる */
+function mergeCookies(...cookieStrings: (string | undefined)[]): string {
+  const map = new Map<string, string>();
+  for (const cs of cookieStrings) {
+    if (!cs) continue;
+    for (const pair of cs.split(";")) {
+      const eq = pair.indexOf("=");
+      if (eq === -1) continue;
+      const name = pair.slice(0, eq).trim();
+      const value = pair.slice(eq + 1).trim();
+      if (!name) continue;
+      map.set(name, value);
+    }
+  }
+  return [...map.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
+/** ログインID・パスワードが誤っている、またはCampusWeb側の認証に失敗した場合のエラー */
+export class CampusWebAuthError extends Error {
+  constructor(message = "ユーザIDまたはパスワードが違います。大学ポータルの認証情報をご確認ください。") {
+    super(message);
+    this.name = "CampusWebAuthError";
+  }
+}
+
+export interface CampusWebSession {
+  /** 以降のリクエストのCookieヘッダーにそのまま使うログイン済みセッション文字列 */
+  cookie: string;
+}
+
+/**
+ * 大学ポータル(Campus-Xs)へユーザID・パスワードでログインし、以後のシラバス検索に
+ * 使えるセッションCookieを返す。userId・passwordはこの関数のローカル変数としてのみ
+ * 使用し、キャッシュ・ログ・DBなどサーバー側の永続領域には一切書き込まない。
+ */
+export async function loginToCampusWeb(userId: string, password: string): Promise<CampusWebSession> {
+  const topUrl = absoluteUrl(cfg.campusWeb.baseUrl, cfg.auth.loginPagePath);
+  const topResponse = await politeFetch(topUrl, { method: "GET" });
+  if (!topResponse.ok) {
+    throw new Error(`ログイン画面の取得に失敗しました: ${topResponse.status}`);
+  }
+
+  const initialCookie = collectSetCookie(topResponse.headers);
+  const html = await topResponse.text();
+  const $ = cheerio.load(html);
+  const actionPath = $(cfg.auth.loginFormSelector).attr("action");
+  if (!actionPath) {
+    throw new Error("ログインフォームが見つかりませんでした（大学サイトの構造が変わった可能性があります）");
+  }
+
+  const loginUrl = absoluteUrl(cfg.campusWeb.baseUrl, actionPath.replace(/^\/?campusweb\//, ""));
+
+  const params = new URLSearchParams();
+  params.set(cfg.auth.fields.buttonName, cfg.auth.loginButtonValue);
+  params.set(cfg.auth.fields.lang, cfg.auth.langValue);
+  params.set(cfg.auth.fields.userId, userId);
+  params.set(cfg.auth.fields.password, password);
+
+  const loginResponse = await politeFetch(loginUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      referer: topUrl,
+      ...(initialCookie ? { cookie: initialCookie } : {}),
+    },
+    body: params.toString(),
+  });
+
+  const responseCookie = collectSetCookie(loginResponse.headers);
+  const cookie = mergeCookies(initialCookie, responseCookie);
+  const bodyText = await loginResponse.text();
+
+  const failed =
+    loginResponse.status === 401 ||
+    cfg.auth.invalidCredentialsMarkers.some((marker) => bodyText.includes(marker));
+  if (failed) {
+    throw new CampusWebAuthError();
+  }
+  if (!loginResponse.ok) {
+    throw new Error(`ログインに失敗しました: ${loginResponse.status}`);
+  }
+
+  return { cookie };
+}
+
 function collectHiddenFields($: cheerio.CheerioAPI): URLSearchParams {
   const params = new URLSearchParams();
   $(cfg.campusWeb.selectors.hiddenFields).each((_, input) => {
@@ -218,15 +303,19 @@ function parseDetailTables($: cheerio.CheerioAPI): Record<string, string> {
   return detail;
 }
 
-export async function scrapeCampusSyllabus(input: CampusSearchInput = {}): Promise<ScrapedCourse[]> {
+export async function scrapeCampusSyllabus(input: CampusSearchInput = {}, session?: CampusWebSession): Promise<ScrapedCourse[]> {
   const searchUrl = absoluteUrl(cfg.campusWeb.baseUrl, cfg.campusWeb.searchPagePath);
 
-  const formResponse = await politeFetch(searchUrl, { method: "GET" });
+  const formResponse = await politeFetch(searchUrl, {
+    method: "GET",
+    headers: session ? { cookie: session.cookie } : {},
+  });
   if (!formResponse.ok) {
     throw new Error(`CampusWeb検索フォームの取得に失敗しました: ${formResponse.status}`);
   }
 
-  const cookie = collectSetCookie(formResponse.headers);
+  const formCookie = collectSetCookie(formResponse.headers);
+  const cookie = session ? mergeCookies(session.cookie, formCookie) : formCookie;
   const formHtml = await formResponse.text();
   const $form = cheerio.load(formHtml);
   const params = buildCampusSearchParams($form, input);
@@ -243,7 +332,11 @@ export async function scrapeCampusSyllabus(input: CampusSearchInput = {}): Promi
   });
 
   if (!resultResponse.ok) {
-    throw new Error(`CampusWeb検索に失敗しました: ${resultResponse.status}`);
+    throw new Error(
+      resultResponse.status === 500
+        ? "CampusWeb検索に失敗しました（未ログイン、またはセッション切れの可能性があります）"
+        : `CampusWeb検索に失敗しました: ${resultResponse.status}`
+    );
   }
 
   const resultHtml = await resultResponse.text();
@@ -265,10 +358,16 @@ export async function scrapeCampusSyllabus(input: CampusSearchInput = {}): Promi
   return [...unique.values()].slice(0, input.limit ?? 80);
 }
 
-export async function scrapeCampusSyllabusDetail(course: Pick<ScrapedCourse, "syllabusUrl">): Promise<Record<string, string>> {
+export async function scrapeCampusSyllabusDetail(
+  course: Pick<ScrapedCourse, "syllabusUrl">,
+  session?: CampusWebSession
+): Promise<Record<string, string>> {
   if (!course.syllabusUrl) return {};
 
-  const response = await politeFetch(course.syllabusUrl, { method: "GET" });
+  const response = await politeFetch(course.syllabusUrl, {
+    method: "GET",
+    headers: session ? { cookie: session.cookie } : {},
+  });
   if (!response.ok) {
     throw new Error(`シラバス詳細の取得に失敗しました: ${response.status}`);
   }
@@ -278,30 +377,33 @@ export async function scrapeCampusSyllabusDetail(course: Pick<ScrapedCourse, "sy
   return parseDetailTables($);
 }
 
-export async function scrapeCampusCourseWithDetail(input: CampusSearchInput): Promise<ScrapedCourse[]> {
-  const courses = await scrapeCampusSyllabus(input);
+export async function scrapeCampusCourseWithDetail(input: CampusSearchInput, session?: CampusWebSession): Promise<ScrapedCourse[]> {
+  const courses = await scrapeCampusSyllabus(input, session);
   const result: ScrapedCourse[] = [];
 
   for (const course of courses) {
-    const detail = await scrapeCampusSyllabusDetail(course).catch(() => ({}));
+    const detail = await scrapeCampusSyllabusDetail(course, session).catch(() => ({}));
     result.push({ ...course, detail });
   }
 
   return result;
 }
 
-export async function scrapeAllEconomicsCourses(year = cfg.campusWeb.defaultYear): Promise<ScrapedCourse[]> {
+export async function scrapeAllEconomicsCourses(year = cfg.campusWeb.defaultYear, session?: CampusWebSession): Promise<ScrapedCourse[]> {
   const seen = new Map<string, ScrapedCourse>();
 
   for (const grade of cfg.campusWeb.gradeValues) {
     for (const day of cfg.campusWeb.dayValues) {
-      const courses = await scrapeCampusSyllabus({
-        year,
-        grade,
-        day,
-        departmentLabel: cfg.campusWeb.departmentLabel,
-        limit: 300,
-      }).catch(() => []);
+      const courses = await scrapeCampusSyllabus(
+        {
+          year,
+          grade,
+          day,
+          departmentLabel: cfg.campusWeb.departmentLabel,
+          limit: 300,
+        },
+        session
+      ).catch(() => []);
 
       for (const course of courses) {
         if (!seen.has(course.id)) seen.set(course.id, course);
