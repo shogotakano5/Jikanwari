@@ -50,34 +50,88 @@ async function politeFetch(url: string, init: RequestInit = {}): Promise<Respons
   }
 }
 
-function collectSetCookie(headers: Headers): string {
+function extractSetCookiePairs(headers: Headers): [string, string][] {
   // Next.js/Node fetch は環境によって getSetCookie がある。
   const anyHeaders = headers as Headers & { getSetCookie?: () => string[] };
   const cookies = anyHeaders.getSetCookie?.() ?? [];
   const fallback = headers.get("set-cookie");
-  if (fallback) cookies.push(fallback);
+  if (fallback && cookies.length === 0) cookies.push(fallback);
 
-  return cookies
-    .map((cookie) => cookie.split(";")[0])
-    .filter(Boolean)
-    .join("; ");
+  const pairs: [string, string][] = [];
+  for (const cookie of cookies) {
+    const first = cookie.split(";")[0];
+    const eq = first.indexOf("=");
+    if (eq === -1) continue;
+    const name = first.slice(0, eq).trim();
+    const value = first.slice(eq + 1).trim();
+    if (name) pairs.push([name, value]);
+  }
+  return pairs;
 }
 
-/** 複数のCookie文字列("a=1; b=2")を名前ベースでマージし、後勝ちで1本の文字列にまとめる */
-function mergeCookies(...cookieStrings: (string | undefined)[]): string {
-  const map = new Map<string, string>();
-  for (const cs of cookieStrings) {
-    if (!cs) continue;
-    for (const pair of cs.split(";")) {
-      const eq = pair.indexOf("=");
-      if (eq === -1) continue;
-      const name = pair.slice(0, eq).trim();
-      const value = pair.slice(eq + 1).trim();
-      if (!name) continue;
-      map.set(name, value);
+/**
+ * ログイン〜検索の一連のリクエストをまたいでCookieを蓄積するジャー。
+ * Campus-Xs(Tomcat)は認証成功時にセッション固定攻撃対策で新しいJSESSIONIDを
+ * 302リダイレクトのSet-Cookieで発行するため、リダイレクトを手動追従して各ホップの
+ * Set-Cookieを取りこぼさず蓄積する必要がある（これが従来ログイン後も未認証扱いに
+ * なっていた原因）。
+ */
+class CookieJar {
+  private jar = new Map<string, string>();
+
+  updateFrom(headers: Headers): void {
+    for (const [name, value] of extractSetCookiePairs(headers)) {
+      this.jar.set(name, value);
     }
   }
-  return [...map.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+
+  header(): string {
+    return [...this.jar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+  }
+
+  has(name: string): boolean {
+    return this.jar.has(name);
+  }
+
+  names(): string[] {
+    return [...this.jar.keys()];
+  }
+}
+
+/**
+ * politeFetchをリダイレクト手動追従モードで実行し、各ホップのSet-Cookieを
+ * jarへ蓄積しながら最終レスポンスを返す。追従時もjarの最新Cookieを送り直す。
+ */
+async function fetchWithJar(url: string, init: RequestInit, jar: CookieJar, maxRedirects = 5): Promise<Response> {
+  let currentUrl = url;
+  let method = (init.method ?? "GET").toUpperCase();
+  let body = init.body;
+
+  for (let i = 0; i <= maxRedirects; i++) {
+    const cookie = jar.header();
+    const response = await politeFetch(currentUrl, {
+      ...init,
+      method,
+      body,
+      redirect: "manual",
+      headers: {
+        ...(init.headers ?? {}),
+        ...(cookie ? { cookie } : {}),
+      },
+    });
+    jar.updateFrom(response.headers);
+
+    const location = response.headers.get("location");
+    const isRedirect = response.status >= 300 && response.status < 400 && location;
+    if (!isRedirect) return response;
+
+    // リダイレクト先はbody無しのGETで辿る（303、およびPOST後の302はGETに切り替わるのが通例）
+    currentUrl = absoluteUrl(currentUrl, location);
+    method = "GET";
+    body = undefined;
+  }
+
+  throw new Error("リダイレクトが多すぎます（大学サイトの構造が変わった可能性があります）");
 }
 
 /** ログインID・パスワードが誤っている、またはCampusWeb側の認証に失敗した場合のエラー */
@@ -89,23 +143,39 @@ export class CampusWebAuthError extends Error {
 }
 
 export interface CampusWebSession {
-  /** 以降のリクエストのCookieヘッダーにそのまま使うログイン済みセッション文字列 */
-  cookie: string;
+  /** ログイン〜検索を通じてCookieを蓄積するジャー */
+  jar: CookieJar;
+}
+
+/** ログイン処理の結果診断（scraper-adminのログインテスト用） */
+export interface LoginDiagnostics {
+  ok: boolean;
+  finalStatus: number;
+  finalTitle: string;
+  landedOnLoginPage: boolean;
+  cookieNames: string[];
+  message: string;
 }
 
 /**
  * 大学ポータル(Campus-Xs)へユーザID・パスワードでログインし、以後のシラバス検索に
- * 使えるセッションCookieを返す。userId・passwordはこの関数のローカル変数としてのみ
- * 使用し、キャッシュ・ログ・DBなどサーバー側の永続領域には一切書き込まない。
+ * 使えるログイン済みセッション(Cookieジャー)を返す。userId・passwordはこの関数の
+ * ローカル変数としてのみ使用し、キャッシュ・ログ・DBなどサーバー側の永続領域には
+ * 一切書き込まない。
+ *
+ * 認証成功時、Campus-Xsは302リダイレクトのSet-Cookieで新しいJSESSIONIDを発行する
+ * ため、リダイレクトを手動追従してその新Cookieをジャーへ確実に取り込む
+ * （fetchの自動リダイレクト追従だと途中のSet-Cookieを取りこぼし、以降のリクエストが
+ * ログイン前の未認証セッションのままになってしまう）。
  */
 export async function loginToCampusWeb(userId: string, password: string): Promise<CampusWebSession> {
+  const jar = new CookieJar();
   const topUrl = absoluteUrl(cfg.campusWeb.baseUrl, cfg.auth.loginPagePath);
-  const topResponse = await politeFetch(topUrl, { method: "GET" });
+  const topResponse = await fetchWithJar(topUrl, { method: "GET" }, jar);
   if (!topResponse.ok) {
     throw new Error(`ログイン画面の取得に失敗しました: ${topResponse.status}`);
   }
 
-  const initialCookie = collectSetCookie(topResponse.headers);
   const html = await topResponse.text();
   const $ = cheerio.load(html);
   const actionPath = $(cfg.auth.loginFormSelector).attr("action");
@@ -121,23 +191,26 @@ export async function loginToCampusWeb(userId: string, password: string): Promis
   params.set(cfg.auth.fields.userId, userId);
   params.set(cfg.auth.fields.password, password);
 
-  const loginResponse = await politeFetch(loginUrl, {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      referer: topUrl,
-      ...(initialCookie ? { cookie: initialCookie } : {}),
+  const loginResponse = await fetchWithJar(
+    loginUrl,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        referer: topUrl,
+      },
+      body: params.toString(),
     },
-    body: params.toString(),
-  });
+    jar
+  );
 
-  const responseCookie = collectSetCookie(loginResponse.headers);
-  const cookie = mergeCookies(initialCookie, responseCookie);
   const bodyText = await loginResponse.text();
 
   const failed =
     loginResponse.status === 401 ||
-    cfg.auth.invalidCredentialsMarkers.some((marker) => bodyText.includes(marker));
+    cfg.auth.invalidCredentialsMarkers.some((marker) => bodyText.includes(marker)) ||
+    // リダイレクト追従後もログイン画面が返る = 認証に失敗している
+    /class="camjnext-login"/.test(bodyText);
   if (failed) {
     throw new CampusWebAuthError();
   }
@@ -145,7 +218,80 @@ export async function loginToCampusWeb(userId: string, password: string): Promis
     throw new Error(`ログインに失敗しました: ${loginResponse.status}`);
   }
 
-  return { cookie };
+  return { jar };
+}
+
+/**
+ * ログインだけを試し、結果の診断情報を返す（例外を投げない）。scraper-adminの
+ * 「ログインだけテスト」ボタン用。検索が0件になるとき、原因がログイン失敗なのか
+ * 検索側なのかを切り分けられるようにする。
+ */
+export async function testLogin(userId: string, password: string): Promise<LoginDiagnostics> {
+  const jar = new CookieJar();
+  try {
+    const topUrl = absoluteUrl(cfg.campusWeb.baseUrl, cfg.auth.loginPagePath);
+    const topResponse = await fetchWithJar(topUrl, { method: "GET" }, jar);
+    const topHtml = await topResponse.text();
+    const $ = cheerio.load(topHtml);
+    const actionPath = $(cfg.auth.loginFormSelector).attr("action");
+    if (!actionPath) {
+      return {
+        ok: false,
+        finalStatus: topResponse.status,
+        finalTitle: normalizeText($("title").text()),
+        landedOnLoginPage: true,
+        cookieNames: jar.names(),
+        message: "ログインフォームが見つかりませんでした（大学サイトの構造が変わった可能性があります）。",
+      };
+    }
+
+    const loginUrl = absoluteUrl(cfg.campusWeb.baseUrl, actionPath.replace(/^\/?campusweb\//, ""));
+    const params = new URLSearchParams();
+    params.set(cfg.auth.fields.buttonName, cfg.auth.loginButtonValue);
+    params.set(cfg.auth.fields.lang, cfg.auth.langValue);
+    params.set(cfg.auth.fields.userId, userId);
+    params.set(cfg.auth.fields.password, password);
+
+    const loginResponse = await fetchWithJar(
+      loginUrl,
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", referer: topUrl },
+        body: params.toString(),
+      },
+      jar
+    );
+    const bodyText = await loginResponse.text();
+    const $result = cheerio.load(bodyText);
+    const landedOnLoginPage =
+      /class="camjnext-login"/.test(bodyText) ||
+      cfg.auth.invalidCredentialsMarkers.some((marker) => bodyText.includes(marker));
+    const invalidCreds =
+      loginResponse.status === 401 || cfg.auth.invalidCredentialsMarkers.some((marker) => bodyText.includes(marker));
+    const ok = !landedOnLoginPage && loginResponse.status < 400;
+
+    return {
+      ok,
+      finalStatus: loginResponse.status,
+      finalTitle: normalizeText($result("title").text()),
+      landedOnLoginPage,
+      cookieNames: jar.names(),
+      message: ok
+        ? "ログインに成功しました。"
+        : invalidCreds
+          ? "ユーザIDまたはパスワードが違います。"
+          : "ログイン後もログイン画面に戻されました（認証に失敗、またはサイト構造の変化の可能性があります）。",
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      finalStatus: 0,
+      finalTitle: "",
+      landedOnLoginPage: false,
+      cookieNames: jar.names(),
+      message: `ログイン試行中にエラーが発生しました: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }
 
 function collectHiddenFields($: cheerio.CheerioAPI): URLSearchParams {
@@ -342,32 +488,39 @@ async function runCampusSyllabusSearch(
   input: CampusSearchInput,
   session: CampusWebSession | undefined
 ): Promise<{ courses: ScrapedCourse[]; diagnostics: SearchDiagnostics }> {
+  // ログイン済みならそのジャーを引き継ぎ、未ログインなら一時ジャーでGET→POST間の
+  // Cookieを維持する。
+  const jar = session?.jar ?? new CookieJar();
   const searchUrl = absoluteUrl(cfg.campusWeb.baseUrl, cfg.campusWeb.searchPagePath);
 
-  const formResponse = await politeFetch(searchUrl, {
-    method: "GET",
-    headers: session ? { cookie: session.cookie } : {},
-  });
+  const formResponse = await fetchWithJar(searchUrl, { method: "GET" }, jar);
   if (!formResponse.ok) {
     throw new Error(`CampusWeb検索フォームの取得に失敗しました: ${formResponse.status}`);
   }
 
-  const formCookie = collectSetCookie(formResponse.headers);
-  const cookie = session ? mergeCookies(session.cookie, formCookie) : formCookie;
   const formHtml = await formResponse.text();
   const $form = cheerio.load(formHtml);
   const params = buildCampusSearchParams($form, input);
 
-  const submitUrl = absoluteUrl(cfg.campusWeb.baseUrl, cfg.campusWeb.searchSubmitPath);
-  const resultResponse = await politeFetch(submitUrl, {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      referer: searchUrl,
-      ...(cookie ? { cookie } : {}),
+  // 検索フォームのaction属性(jsessionidをパスに含む実URL)へPOSTする。無ければ
+  // 素のslbssrch.doにフォールバック（Cookieのセッションで認証される）。
+  const formAction = $form(cfg.campusWeb.selectors.searchForm).attr("action");
+  const submitUrl = formAction
+    ? absoluteUrl(cfg.campusWeb.baseUrl, formAction.replace(/^\/?campusweb\//, ""))
+    : absoluteUrl(cfg.campusWeb.baseUrl, cfg.campusWeb.searchSubmitPath);
+
+  const resultResponse = await fetchWithJar(
+    submitUrl,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        referer: searchUrl,
+      },
+      body: params.toString(),
     },
-    body: params.toString(),
-  });
+    jar
+  );
 
   if (!resultResponse.ok) {
     throw new Error(
@@ -418,10 +571,8 @@ export async function scrapeCampusSyllabusDetail(
 ): Promise<Record<string, string>> {
   if (!course.syllabusUrl) return {};
 
-  const response = await politeFetch(course.syllabusUrl, {
-    method: "GET",
-    headers: session ? { cookie: session.cookie } : {},
-  });
+  const jar = session?.jar ?? new CookieJar();
+  const response = await fetchWithJar(course.syllabusUrl, { method: "GET" }, jar);
   if (!response.ok) {
     throw new Error(`シラバス詳細の取得に失敗しました: ${response.status}`);
   }

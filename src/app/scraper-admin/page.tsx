@@ -25,6 +25,15 @@ interface SyncResponse {
   authFailed?: boolean;
 }
 
+interface LoginDiagnostics {
+  ok: boolean;
+  finalStatus: number;
+  finalTitle: string;
+  landedOnLoginPage: boolean;
+  cookieNames: string[];
+  message: string;
+}
+
 interface DebugResponse {
   courses: Course[];
   diagnostics?: {
@@ -109,6 +118,9 @@ export default function ScraperAdminPage() {
   const [debugResult, setDebugResult] = useState<DebugResponse | null>(null);
   const [debugRunning, setDebugRunning] = useState(false);
 
+  const [loginTest, setLoginTest] = useState<LoginDiagnostics | null>(null);
+  const [loginTesting, setLoginTesting] = useState(false);
+
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
   const scrapedCombined = useMemo(() => mergeCourses(scrapedAll, scrapedByName), [scrapedAll, scrapedByName]);
@@ -132,6 +144,31 @@ export default function ScraperAdminPage() {
   const finalCourses = useMemo(() => mergeCourses(scrapedCombined, guideFallback), [scrapedCombined, guideFallback]);
 
   const canRun = userId.trim().length > 0 && password.length > 0;
+
+  async function runTestLogin() {
+    setLoginTesting(true);
+    setLoginTest(null);
+    try {
+      const res = await fetch("/api/admin/test-login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId, password }),
+      });
+      const data: LoginDiagnostics = await res.json();
+      setLoginTest(data);
+    } catch (e) {
+      setLoginTest({
+        ok: false,
+        finalStatus: 0,
+        finalTitle: "",
+        landedOnLoginPage: false,
+        cookieNames: [],
+        message: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setLoginTesting(false);
+    }
+  }
 
   async function runScrapeAll() {
     setRunningAll(true);
@@ -242,6 +279,31 @@ export default function ScraperAdminPage() {
             className="rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
           />
         </label>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+        <p className="text-sm font-semibold">まずログインだけテスト</p>
+        <p className="mt-1 text-xs text-zinc-500">
+          取得が0件になるとき、ログイン自体が失敗しているのか検索側の問題なのかを切り分けます。
+        </p>
+        <button
+          onClick={runTestLogin}
+          disabled={!canRun || loginTesting}
+          className="mt-2 rounded-lg bg-zinc-800 px-3 py-2 text-xs font-medium text-white hover:bg-zinc-900 disabled:opacity-50"
+        >
+          {loginTesting ? "ログイン確認中..." : "ログインだけテスト"}
+        </button>
+        {loginTest && (
+          <div className={`mt-2 text-xs ${loginTest.ok ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+            <p className="font-semibold">{loginTest.ok ? "✓ ログイン成功" : "✗ ログイン失敗"}: {loginTest.message}</p>
+            <ul className="mt-1 list-disc pl-4 text-zinc-600 dark:text-zinc-300">
+              <li>最終HTTPステータス: {loginTest.finalStatus}</li>
+              <li>遷移先ページタイトル: {loginTest.finalTitle || "（取得できず）"}</li>
+              <li>ログイン画面に留まった: {loginTest.landedOnLoginPage ? "はい" : "いいえ"}</li>
+              <li>取得できたCookie: {loginTest.cookieNames.join(", ") || "なし"}</li>
+            </ul>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">

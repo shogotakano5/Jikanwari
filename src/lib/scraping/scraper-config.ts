@@ -101,6 +101,7 @@ export const ASAHIKAWA_SCRAPER_CONFIG = {
     periodValues: [1, 2, 3, 4, 5, 6, 7],
 
     selectors: {
+      searchForm: "form[name='sylbsActionForm'], form#form",
       hiddenFields: "form input[type=hidden]",
       resultRows: [
         "table tr:has(a[href*='slbssbdr.do'])",

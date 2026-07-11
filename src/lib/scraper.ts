@@ -6,10 +6,12 @@ import {
   scrapeCampusSyllabusWithDiagnostics,
   scrapeCoursesByNames,
   loginToCampusWeb,
+  testLogin,
   CampusWebAuthError,
   type CampusWebSession,
   type SearchDiagnostics,
   type NamedSearchProgress,
+  type LoginDiagnostics,
 } from "./scraping/asahikawa-scraper";
 import { ASAHIKAWA_SCRAPER_CONFIG, type ScrapedCourse } from "./scraping/scraper-config";
 import { unstable_cache } from "next/cache";
@@ -273,6 +275,11 @@ export async function scrapeKnownRequiredCourses(
       warning: `科目名検索に失敗しました（${err instanceof Error ? err.message : String(err)}）。`,
     };
   }
+}
+
+/** ログインだけを試して診断結果を返す（scraper-adminのログインテスト用） */
+export async function testCampusLogin(credentials: CampusWebCredentials): Promise<LoginDiagnostics> {
+  return testLogin(credentials.userId, credentials.password);
 }
 
 export interface DiagnosticSearchResult {
