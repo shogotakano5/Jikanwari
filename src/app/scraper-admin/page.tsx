@@ -102,6 +102,79 @@ function mergeCourses(...lists: Course[][]): Course[] {
   return [...byId.values()];
 }
 
+function generateCoursesHtml(courses: Course[]): string {
+  const rows = courses.map((course) => {
+    const eval_txt = course.evaluation.map((e) => `${e.type}${e.percentage}%`).join(" ");
+    return `
+    <tr>
+      <td>${escapeHtml(course.name)}</td>
+      <td>${escapeHtml(course.teacher)}</td>
+      <td>${course.day ?? ""}</td>
+      <td>${course.period ?? ""}</td>
+      <td>${course.credits}</td>
+      <td>${course.semester}</td>
+      <td>${escapeHtml(course.categoryKey ?? "")}</td>
+      <td>${escapeHtml(course.overview.slice(0, 100))}</td>
+      <td>${eval_txt}</td>
+      <td>${course.source}</td>
+    </tr>
+    `;
+  });
+
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>旭川市立大学 シラバスデータ</title>
+  <style>
+    body { font-family: "Segoe UI", sans-serif; margin: 20px; background: #f5f5f5; }
+    h1 { color: #333; }
+    table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    th { background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 600; }
+    td { padding: 10px 12px; border-bottom: 1px solid #ddd; }
+    tr:hover { background: #f9f9f9; }
+    .meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+    .info { background: #e3f2fd; padding: 10px; border-left: 4px solid #2196F3; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <h1>旭川市立大学 シラバスデータ</h1>
+  <div class="meta">
+    <p>取得日時: ${new Date().toLocaleString("ja-JP")}</p>
+    <p>科目数: ${courses.length}件</p>
+  </div>
+  <div class="info">
+    <strong>注:</strong> source が "guide" の科目は履修ガイドから補完されたもので、担当教員・開講曜日時限は未確認です。
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>科目名</th>
+        <th>担当教員</th>
+        <th>曜日</th>
+        <th>時限</th>
+        <th>単位</th>
+        <th>開講期</th>
+        <th>区分</th>
+        <th>概要(先頭100文字)</th>
+        <th>評価方法</th>
+        <th>取得元</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows.join("")}
+    </tbody>
+  </table>
+</body>
+</html>`;
+}
+
+function escapeHtml(text: string): string {
+  const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
+  return text.replace(/[&<>"']/g, (m) => map[m]);
+}
+
 export default function ScraperAdminPage() {
   const { addCourses, courses: storedCourses } = useAppData();
   const [userId, setUserId] = useState("");
@@ -250,6 +323,17 @@ export default function ScraperAdminPage() {
     URL.revokeObjectURL(url);
   }
 
+  function downloadHtml() {
+    const html = generateCoursesHtml(finalCourses);
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `asahikawa-courses-scraped-${Date.now()}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="mx-auto max-w-3xl px-4 pt-6 pb-8">
       <h1 className="text-xl font-bold">シラバス スクレイパー（管理者用）</h1>
@@ -352,6 +436,13 @@ export default function ScraperAdminPage() {
             className="rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-200 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-200"
           >
             JSONをダウンロード（public/data/への反映用）
+          </button>
+          <button
+            onClick={downloadHtml}
+            disabled={finalCourses.length === 0}
+            className="rounded-lg bg-green-100 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-200 disabled:opacity-50 dark:bg-green-900/30 dark:text-green-300"
+          >
+            HTMLをダウンロード（ブラウザで確認用）
           </button>
         </div>
         {savedMessage && <p className="mt-2 text-amber-700 dark:text-amber-300">{savedMessage}</p>}

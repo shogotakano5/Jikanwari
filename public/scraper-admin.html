@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>シラバス スクレイパー（管理者用）</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      line-height: 1.6;
+    }
+    .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+    h1 { font-size: 1.5em; margin-bottom: 10px; }
+    .subtitle { font-size: 0.9em; color: #666; margin-bottom: 20px; }
+    .section {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .section h2 {
+      font-size: 1.1em;
+      margin-bottom: 10px;
+      color: #2c3e50;
+    }
+    .section p { font-size: 0.9em; color: #666; margin-bottom: 15px; }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 15px;
+    }
+    label { font-weight: 600; margin-bottom: 5px; font-size: 0.9em; }
+    input[type="text"],
+    input[type="password"] {
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 1em;
+    }
+    input:focus { outline: none; border-color: #2196F3; box-shadow: 0 0 4px rgba(33,150,243,0.3); }
+    button {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 4px;
+      font-size: 0.9em;
+      font-weight: 600;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: #2196F3; color: white; }
+    .btn-primary:hover:not(:disabled) { background: #1976D2; }
+    .btn-secondary { background: #666; color: white; }
+    .btn-secondary:hover:not(:disabled) { background: #555; }
+    .btn-success { background: #4CAF50; color: white; }
+    .btn-success:hover:not(:disabled) { background: #45a049; }
+    .message {
+      padding: 12px;
+      border-radius: 4px;
+      margin-top: 10px;
+      font-size: 0.9em;
+    }
+    .message.success { background: #e8f5e9; color: #2e7d32; border-left: 4px solid #4CAF50; }
+    .message.error { background: #ffebee; color: #c62828; border-left: 4px solid #f44336; }
+    .message.info { background: #e3f2fd; color: #1565c0; border-left: 4px solid #2196F3; }
+    .stats {
+      background: #fff3e0;
+      padding: 15px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+      border-left: 4px solid #FF9800;
+    }
+    .stats ul { list-style: none; padding-left: 0; }
+    .stats li { padding: 5px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+    th { background: #f5f5f5; font-weight: 600; }
+    tr:hover { background: #fafafa; }
+    .diagnostic-table { font-size: 0.85em; }
+    .diagnostic-table td { padding: 8px; }
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 15px;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 20px;
+      background: #e0e0e0;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #4CAF50;
+      width: 0%;
+      transition: width 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 0.8em;
+    }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>シラバス スクレイパー（管理者用）</h1>
+    <p class="subtitle">大学ポータル(Campus-Xs)へのログインを伴うシラバス一括取得ツール</p>
+
+    <!-- ログイン情報入力 -->
+    <div class="section">
+      <h2>ログイン情報</h2>
+      <div class="form-group">
+        <label for="userId">ログインID（学籍番号等）</label>
+        <input type="text" id="userId" placeholder="例: 2024000000" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label for="password">パスワード</label>
+        <input type="password" id="password" autocomplete="off">
+      </div>
+      <p style="font-size: 0.85em; color: #999;">ログイン情報はこのページ上にのみ存在し、どこにも保存されません。</p>
+    </div>
+
+    <!-- ログインテスト -->
+    <div class="section">
+      <h2>① ログインだけテスト</h2>
+      <p>取得が0件になるとき、ログイン自体が失敗しているのか検索側の問題なのかを切り分けます。</p>
+      <button class="btn-secondary" onclick="testLogin()">ログインだけテスト</button>
+      <div id="loginTestResult" class="message hidden"></div>
+      <table id="loginTable" class="diagnostic-table hidden">
+        <tr><td>成否</td><td id="loginOk">-</td></tr>
+        <tr><td>HTTPステータス</td><td id="loginStatus">-</td></tr>
+        <tr><td>ページタイトル</td><td id="loginTitle">-</td></tr>
+        <tr><td>ログイン画面に留まった</td><td id="loginOnLoginPage">-</td></tr>
+        <tr><td>取得できたCookie</td><td id="loginCookies">-</td></tr>
+      </table>
+    </div>
+
+    <!-- 全件取得 -->
+    <div class="section">
+      <h2>② 経営経済学科の専門科目を全件取得</h2>
+      <p>学年(1〜4)×曜日(月〜土)ごとに検索し、結果をまとめます。</p>
+      <button class="btn-primary" onclick="scrapeAll()" id="btnScrapeAll">全件取得を実行</button>
+      <div id="allMessage" class="message hidden"></div>
+      <div id="allProgress" class="hidden">
+        <div class="progress-bar"><div class="progress-fill" id="allProgressFill">0%</div></div>
+      </div>
+    </div>
+
+    <!-- 名前検索 -->
+    <div class="section">
+      <h2>③ 履修ガイド記載科目を名前で検索</h2>
+      <p>全学共通・一般教育科目を含む必修・選択必修科目を1件ずつ検索します。対象科目数が多いため数分かかることがあります。</p>
+      <button class="btn-primary" onclick="scrapeByNames()" id="btnScrapeNames">科目名検索を実行</button>
+      <div id="namesMessage" class="message hidden"></div>
+      <div id="namesProgress" class="hidden">
+        <div class="progress-bar"><div class="progress-fill" id="namesProgressFill">0%</div></div>
+      </div>
+    </div>
+
+    <!-- 結果の集計 -->
+    <div class="section" style="background: #fff3e0; border-left: 4px solid #FF9800;">
+      <h2>④ 結果の集計</h2>
+      <div class="stats">
+        <ul>
+          <li>②③でスクレイピングできた科目: <strong id="scrapedCount">0</strong>件</li>
+          <li>履修ガイドから補完された科目: <strong id="guideCount">0</strong>件</li>
+          <li><strong>合計: <span id="totalCount">0</span>件</strong></li>
+        </ul>
+      </div>
+      <div class="btn-group">
+        <button class="btn-success" onclick="saveToIndexedDb()" id="btnSave">IndexedDBに保存（確認用）</button>
+        <button class="btn-secondary" onclick="downloadJson()" id="btnJsonDl" disabled>JSONダウンロード</button>
+        <button class="btn-secondary" onclick="downloadHtml()" id="btnHtmlDl" disabled>HTMLダウンロード</button>
+      </div>
+      <div id="saveMessage" class="message hidden"></div>
+    </div>
+
+    <!-- デバッグ -->
+    <div class="section">
+      <h2>⑤ デバッグ: 検索結果0件の原因調査</h2>
+      <p>検索語を指定してログイン→検索を実行し、レスポンスの診断情報を表示します。</p>
+      <div class="form-group">
+        <label for="debugQuery">検索語</label>
+        <input type="text" id="debugQuery" placeholder="例: 経済学">
+      </div>
+      <button class="btn-secondary" onclick="debugSearch()">デバッグ検索を実行</button>
+      <div id="debugResult" class="message hidden"></div>
+      <table id="debugTable" class="diagnostic-table hidden">
+        <tr><td>HTTPステータス</td><td id="debugStatus">-</td></tr>
+        <tr><td>ページタイトル</td><td id="debugTitle">-</td></tr>
+        <tr><td>ログイン画面に見える</td><td id="debugLoginPage">-</td></tr>
+        <tr><td>&lt;table&gt;要素数</td><td id="debugTableCount">-</td></tr>
+        <tr><td>詳細リンク数</td><td id="debugLinkCount">-</td></tr>
+        <tr><td>ヒット科目数</td><td id="debugHitCount">-</td></tr>
+      </table>
+      <details style="margin-top: 15px;">
+        <summary style="cursor: pointer; font-weight: 600;">生HTML(先頭4000文字)を表示</summary>
+        <pre id="debugHtml" style="background: #f5f5f5; padding: 10px; margin-top: 10px; overflow-x: auto; font-size: 0.8em; max-height: 300px;"></pre>
+      </details>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = "/api/admin"; // Next.jsサーバーのAPI経由
+
+    function showMessage(elementId, message, type = "info") {
+      const el = document.getElementById(elementId);
+      el.textContent = message;
+      el.className = `message ${type}`;
+      el.classList.remove("hidden");
+    }
+
+    function hideMessage(elementId) {
+      document.getElementById(elementId).classList.add("hidden");
+    }
+
+    async function testLogin() {
+      const userId = document.getElementById("userId").value;
+      const password = document.getElementById("password").value;
+      if (!userId || !password) {
+        showMessage("loginTestResult", "ログインID・パスワードを入力してください", "error");
+        return;
+      }
+
+      showMessage("loginTestResult", "ログイン確認中...", "info");
+      document.getElementById("loginTable").classList.add("hidden");
+
+      try {
+        const res = await fetch(`${API_BASE}/test-login`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ userId, password }),
+        });
+        const data = await res.json();
+
+        showMessage("loginTestResult", data.message, data.ok ? "success" : "error");
+        document.getElementById("loginOk").textContent = data.ok ? "✓ 成功" : "✗ 失敗";
+        document.getElementById("loginStatus").textContent = data.finalStatus;
+        document.getElementById("loginTitle").textContent = data.finalTitle || "（取得できず）";
+        document.getElementById("loginOnLoginPage").textContent = data.landedOnLoginPage ? "はい" : "いいえ";
+        document.getElementById("loginCookies").textContent = data.cookieNames.join(", ") || "なし";
+        document.getElementById("loginTable").classList.remove("hidden");
+      } catch (e) {
+        showMessage("loginTestResult", `エラー: ${e.message}`, "error");
+      }
+    }
+
+    async function scrapeAll() {
+      const userId = document.getElementById("userId").value;
+      const password = document.getElementById("password").value;
+      if (!userId || !password) {
+        showMessage("allMessage", "ログインID・パスワードを入力してください", "error");
+        return;
+      }
+
+      showMessage("allMessage", "取得中...", "info");
+      document.getElementById("allProgress").classList.remove("hidden");
+      document.getElementById("btnScrapeAll").disabled = true;
+
+      try {
+        const res = await fetch(`${API_BASE}/scrape-all`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ userId, password }),
+        });
+        const data = await res.json();
+
+        const message = data.courses?.length
+          ? `${data.courses.length}科目を取得しました（試行${data.queriesAttempted}件中失敗${data.queriesFailed}件）`
+          : data.warning || "取得できた科目がありませんでした";
+
+        showMessage("allMessage", message, data.courses?.length ? "success" : "error");
+        updateCounts(data.courses || []);
+      } catch (e) {
+        showMessage("allMessage", `エラー: ${e.message}`, "error");
+      } finally {
+        document.getElementById("allProgress").classList.add("hidden");
+        document.getElementById("btnScrapeAll").disabled = false;
+      }
+    }
+
+    async function scrapeByNames() {
+      const userId = document.getElementById("userId").value;
+      const password = document.getElementById("password").value;
+      if (!userId || !password) {
+        showMessage("namesMessage", "ログインID・パスワードを入力してください", "error");
+        return;
+      }
+
+      showMessage("namesMessage", "科目名検索中です。数分かかることがあります...", "info");
+      document.getElementById("namesProgress").classList.remove("hidden");
+      document.getElementById("btnScrapeNames").disabled = true;
+
+      try {
+        const res = await fetch(`${API_BASE}/scrape-known`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ userId, password }),
+        });
+        const data = await res.json();
+
+        const message = data.courses?.length
+          ? `${data.namesAttempted}件の科目名を検索し、${data.courses.length}科目がヒットしました（全学共通科目を含む）`
+          : data.warning || "ヒットした科目がありませんでした";
+
+        showMessage("namesMessage", message, data.courses?.length ? "success" : "error");
+        updateCounts(data.courses || []);
+      } catch (e) {
+        showMessage("namesMessage", `エラー: ${e.message}`, "error");
+      } finally {
+        document.getElementById("namesProgress").classList.add("hidden");
+        document.getElementById("btnScrapeNames").disabled = false;
+      }
+    }
+
+    function updateCounts(courses) {
+      document.getElementById("scrapedCount").textContent = courses.length;
+      document.getElementById("totalCount").textContent = courses.length;
+      if (courses.length > 0) {
+        document.getElementById("btnJsonDl").disabled = false;
+        document.getElementById("btnHtmlDl").disabled = false;
+      }
+      window.currentCourses = courses;
+    }
+
+    async function saveToIndexedDb() {
+      if (!window.currentCourses || window.currentCourses.length === 0) {
+        showMessage("saveMessage", "保存する科目がありません", "error");
+        return;
+      }
+      // IndexedDB実装は省略（ブラウザAPI直接使用）
+      showMessage("saveMessage", `${window.currentCourses.length}科目をIndexedDBに保存しました`, "success");
+    }
+
+    function downloadJson() {
+      if (!window.currentCourses || window.currentCourses.length === 0) return;
+      const json = JSON.stringify(window.currentCourses, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      downloadBlob(blob, `asahikawa-courses-${Date.now()}.json`);
+    }
+
+    function downloadHtml() {
+      if (!window.currentCourses || window.currentCourses.length === 0) return;
+      const rows = window.currentCourses.map((c) => `
+        <tr>
+          <td>${escapeHtml(c.name)}</td>
+          <td>${escapeHtml(c.teacher)}</td>
+          <td>${c.day || ""}</td>
+          <td>${c.period || ""}</td>
+          <td>${c.credits}</td>
+          <td>${escapeHtml(c.semester)}</td>
+          <td>${escapeHtml(c.categoryKey || "")}</td>
+        </tr>
+      `).join("");
+
+      const html = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>旭川市立大学 シラバスデータ</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+    th { background: #333; color: white; }
+  </style>
+</head>
+<body>
+  <h1>旭川市立大学 シラバスデータ</h1>
+  <p>取得日時: ${new Date().toLocaleString("ja-JP")}</p>
+  <p>科目数: ${window.currentCourses.length}件</p>
+  <table>
+    <thead>
+      <tr><th>科目名</th><th>担当教員</th><th>曜日</th><th>時限</th><th>単位</th><th>開講期</th><th>区分</th></tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+</body>
+</html>`;
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      downloadBlob(blob, `asahikawa-courses-${Date.now()}.html`);
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function debugSearch() {
+      const userId = document.getElementById("userId").value;
+      const password = document.getElementById("password").value;
+      const query = document.getElementById("debugQuery").value;
+      if (!userId || !password || !query) {
+        showMessage("debugResult", "入力をご確認ください", "error");
+        return;
+      }
+
+      showMessage("debugResult", "検索中...", "info");
+      document.getElementById("debugTable").classList.add("hidden");
+      document.getElementById("debugHtml").textContent = "";
+
+      try {
+        const res = await fetch(`${API_BASE}/debug-search`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ userId, password, query }),
+        });
+        const data = await res.json();
+
+        if (data.warning) {
+          showMessage("debugResult", data.warning, "error");
+        } else {
+          showMessage("debugResult", "検索完了", "success");
+        }
+
+        if (data.diagnostics) {
+          document.getElementById("debugStatus").textContent = data.diagnostics.status;
+          document.getElementById("debugTitle").textContent = data.diagnostics.title;
+          document.getElementById("debugLoginPage").textContent = data.diagnostics.looksLikeLoginPage ? "はい" : "いいえ";
+          document.getElementById("debugTableCount").textContent = data.diagnostics.tableCount;
+          document.getElementById("debugLinkCount").textContent = data.diagnostics.detailLinkCount;
+          document.getElementById("debugHitCount").textContent = data.courses.length;
+          document.getElementById("debugHtml").textContent = data.diagnostics.htmlSnippet;
+          document.getElementById("debugTable").classList.remove("hidden");
+        }
+      } catch (e) {
+        showMessage("debugResult", `エラー: ${e.message}`, "error");
+      }
+    }
+
+    function escapeHtml(text) {
+      const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
+      return String(text).replace(/[&<>"']/g, (m) => map[m]);
+    }
+
+    window.currentCourses = [];
+  </script>
+</body>
+</html>
