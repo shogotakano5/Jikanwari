@@ -3,7 +3,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { useAppData } from "@/contexts/AppDataContext";
 import { PERIODS, WEEKDAYS, TERMS, GRADES, type Grade, type Period, type Term, type Weekday } from "@/types";
-import { autoPlaceRequiredCourses } from "@/lib/timetable";
+import { autoPlaceRequiredCourses, expectedSyllabusYear } from "@/lib/timetable";
 import { findRequirementSet } from "@/lib/graduation-requirements";
 import CellDetailModal from "./CellDetailModal";
 
@@ -26,9 +26,14 @@ export default function TimetableGrid() {
     [timetable, grade, term]
   );
 
+  // その学年に在籍していたのは西暦何年度か（入学年度+学年-1）。時間割の候補は
+  // この年度のシラバスから選ぶ（例: 2024年度入学の3年次なら2026年度のシラバス）。
+  const syllabusYear = expectedSyllabusYear(settings.entryYear, grade);
+  const hasSyllabusForYear = useMemo(() => courses.some((c) => c.syllabusYear === syllabusYear), [courses, syllabusYear]);
+
   async function autoPlaceRequired() {
     if (!requirementSet) return;
-    const { placed, skipped } = await autoPlaceRequiredCourses(courses, timetable, requirementSet, grade, term, assignToTimetable);
+    const { placed, skipped } = await autoPlaceRequiredCourses(courses, timetable, requirementSet, grade, term, assignToTimetable, syllabusYear);
     setAutoPlaceMessage(
       `${grade}年 ${term} の必修を${placed}件配置しました。${skipped > 0 ? `${skipped}件は同じ時間に別の授業が既にあるため保留です。` : ""}`
     );
@@ -48,7 +53,7 @@ export default function TimetableGrid() {
         >
           {GRADES.map((g) => (
             <option key={g} value={g}>
-              {g}年
+              {g}年（{expectedSyllabusYear(settings.entryYear, g)}年度）
             </option>
           ))}
         </select>
@@ -74,6 +79,11 @@ export default function TimetableGrid() {
       </div>
       {autoPlaceMessage && (
         <p className="mb-1 shrink-0 text-[11px] text-blue-600 dark:text-blue-400 sm:mb-2 sm:text-xs">{autoPlaceMessage}</p>
+      )}
+      {!hasSyllabusForYear && (
+        <p className="mb-1 shrink-0 text-[11px] text-amber-600 dark:text-amber-400 sm:mb-2 sm:text-xs">
+          {syllabusYear}年度のシラバスデータがまだありません。設定画面の「シラバス年度の選択」から読み込んでください。
+        </p>
       )}
 
       {/*
@@ -130,7 +140,14 @@ export default function TimetableGrid() {
       </div>
 
       {selected && (
-        <CellDetailModal grade={grade} term={term} day={selected.day} period={selected.period} onClose={() => setSelected(null)} />
+        <CellDetailModal
+          grade={grade}
+          term={term}
+          day={selected.day}
+          period={selected.period}
+          syllabusYear={syllabusYear}
+          onClose={() => setSelected(null)}
+        />
       )}
     </div>
   );

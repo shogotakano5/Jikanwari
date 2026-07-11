@@ -54,7 +54,7 @@ export default function SettingsPage() {
     // 全学年・全学期にデフォルトで自動配置する。
     const requirementSet = findRequirementSet(form.entryYear, form.faculty, form.department, form.selectedCourse);
     if (requirementSet) {
-      const { placed, skipped } = await autoPlaceRequiredCoursesEverywhere(courses, timetable, requirementSet, assignToTimetable);
+      const { placed, skipped } = await autoPlaceRequiredCoursesEverywhere(courses, timetable, requirementSet, assignToTimetable, form.entryYear);
       setAutoPlaceMessage(
         placed > 0
           ? `必修科目${placed}件を時間割へ自動配置しました。${skipped > 0 ? `（${skipped}件は既存の授業と重複のため保留）` : ""} 続けて選択必修を選んでください。`

@@ -5,7 +5,7 @@ import type { CourseStatus, Grade, Period, Term, Weekday } from "@/types";
 import { useAppData, timetableSlotId } from "@/contexts/AppDataContext";
 import { findRequirementSet, classifyCourse } from "@/lib/graduation-requirements";
 import { getSubjectGroup } from "@/lib/subject-group";
-import { gradeMatchesCourse, termMatchesSemester } from "@/lib/timetable";
+import { gradeMatchesCourse, termMatchesSemester, courseMatchesSyllabusYear } from "@/lib/timetable";
 import CourseCard from "./CourseCard";
 import ManualCourseDialog from "./ManualCourseDialog";
 
@@ -14,10 +14,12 @@ interface Props {
   term: Term;
   day: Weekday;
   period: Period;
+  /** その学年に在籍していた年度（入学年度+学年-1）。指定時はこの年度のシラバスに候補を絞る */
+  syllabusYear?: number;
   onClose: () => void;
 }
 
-export default function CellDetailModal({ grade, term, day, period, onClose }: Props) {
+export default function CellDetailModal({ grade, term, day, period, syllabusYear, onClose }: Props) {
   const {
     courses,
     timetable,
@@ -52,9 +54,10 @@ export default function CellDetailModal({ grade, term, day, period, onClose }: P
           c.period === period &&
           c.id !== assignedCourse?.id &&
           gradeMatchesCourse(c, grade) &&
-          termMatchesSemester(c.semester, term)
+          termMatchesSemester(c.semester, term) &&
+          (syllabusYear === undefined || courseMatchesSyllabusYear(c, syllabusYear))
       ),
-    [courses, day, period, grade, term, assignedCourse?.id]
+    [courses, day, period, grade, term, assignedCourse?.id, syllabusYear]
   );
 
   const favoriteIds = useMemo(() => new Set(favorites.map((f) => f.courseId)), [favorites]);

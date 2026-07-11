@@ -14,6 +14,23 @@ export function gradeMatchesCourse(course: Course, grade: Grade): boolean {
   return course.targetYears.includes(grade);
 }
 
+/**
+ * ある学年に在籍していたのは西暦何年度か（入学年度+学年-1）。
+ * 例: 2024年度入学の学生が今3年次なら、3年次の時間割は2026年度のシラバスを
+ * 参照し、1年次の時間割は2024年度のシラバスを参照する。
+ */
+export function expectedSyllabusYear(entryYear: number, grade: Grade): number {
+  return entryYear + grade - 1;
+}
+
+/**
+ * 科目が指定した開講年度に属するか。syllabusYear未設定の科目（手入力科目等）は
+ * 年度を問わず常に候補に含める。
+ */
+export function courseMatchesSyllabusYear(course: Course, year: number): boolean {
+  return course.syllabusYear === undefined || course.syllabusYear === year;
+}
+
 export type AssignFn = (grade: Grade, term: Term, day: NonNullable<Course["day"]>, period: NonNullable<Course["period"]>, courseId: string) => Promise<void>;
 
 export interface AutoPlaceResult {
@@ -32,7 +49,8 @@ export async function autoPlaceRequiredCourses(
   requirementSet: GraduationRequirementSet,
   grade: Grade,
   term: Term,
-  assign: AssignFn
+  assign: AssignFn,
+  syllabusYear?: number
 ): Promise<AutoPlaceResult> {
   const requiredCourses = courses.filter(
     (c) =>
@@ -40,7 +58,8 @@ export async function autoPlaceRequiredCourses(
       c.period &&
       classifyCourse(c, requirementSet).label === "必修" &&
       gradeMatchesCourse(c, grade) &&
-      termMatchesSemester(c.semester, term)
+      termMatchesSemester(c.semester, term) &&
+      (syllabusYear === undefined || courseMatchesSyllabusYear(c, syllabusYear))
   );
   let placed = 0;
   let skipped = 0;
@@ -62,12 +81,14 @@ export async function autoPlaceRequiredCoursesEverywhere(
   courses: Course[],
   timetable: TimetableEntry[],
   requirementSet: GraduationRequirementSet,
-  assign: AssignFn
+  assign: AssignFn,
+  entryYear?: number
 ): Promise<AutoPlaceResult> {
   let placed = 0;
   let skipped = 0;
   let workingTimetable = timetable;
   for (const grade of GRADES) {
+    const syllabusYear = entryYear !== undefined ? expectedSyllabusYear(entryYear, grade) : undefined;
     for (const term of TERMS) {
       const result = await autoPlaceRequiredCourses(courses, workingTimetable, requirementSet, grade, term, async (...args) => {
         await assign(...args);
@@ -76,7 +97,7 @@ export async function autoPlaceRequiredCoursesEverywhere(
           ...workingTimetable.filter((e) => !(e.grade === g && e.term === t && e.day === day && e.period === period)),
           { id: `${g}-${t}-${day}-${period}`, grade: g, term: t, day, period, courseId, addedAt: Date.now() },
         ];
-      });
+      }, syllabusYear);
       placed += result.placed;
       skipped += result.skipped;
     }
