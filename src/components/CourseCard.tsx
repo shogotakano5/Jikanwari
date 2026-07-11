@@ -84,8 +84,14 @@ export default function CourseCard({
         )}
         {course.room && <span className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">{course.room}</span>}
         {course.textbook && <span className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">教科書: {course.textbook}</span>}
-        <span className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">
-          {course.source === "manual" ? "手入力" : "大学サイト取得"}
+        <span
+          className={`rounded px-1.5 py-0.5 ${
+            course.source === "guide"
+              ? "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+              : "bg-zinc-100 dark:bg-zinc-800"
+          }`}
+        >
+          {course.source === "manual" ? "手入力" : course.source === "guide" ? "履修ガイド記載（詳細未確認）" : "大学サイト取得"}
         </span>
         {examDate && (
           <span className="rounded bg-red-50 px-1.5 py-0.5 text-red-600 dark:bg-red-900/30 dark:text-red-300">試験 {examDate}</span>

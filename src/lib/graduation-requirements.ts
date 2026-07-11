@@ -220,6 +220,106 @@ function buildCategories(entryYear: number, track: Track): RequirementCategory[]
   ];
 }
 
+/**
+ * 全カリキュラム(2023〜2025年度入学者・2026年度入学者以降)×全コースの必修・選択必修
+ * 科目名を重複排除して集約したもの。全学共通・一般教育科目もここに含まれる
+ * （CURRENT_REQUIRED_GENERAL / LEGACY_REQUIRED_GENERAL 由来）。
+ * スクレイピング時に「所属」フィルタの値を推測する代わりに、この科目名リストで
+ * 直接検索することで、経営経済学科に限らず全学共通科目も含めて確実に検索できる。
+ */
+export function allKnownCourseNames(): string[] {
+  const names = new Set<string>([
+    ...LEGACY_REQUIRED_GENERAL,
+    ...LEGACY_ELECTIVE_REQUIRED_LANGUAGE,
+    ...LEGACY_REQUIRED_PROFESSIONAL,
+    ...CURRENT_REQUIRED_GENERAL,
+    ...CURRENT_REQUIRED_PROFESSIONAL,
+  ]);
+  for (const groups of [LEGACY_ELECTIVE_GROUPS, CURRENT_ELECTIVE_GROUPS]) {
+    for (const track of Object.values(groups)) {
+      for (const key of ELECTIVE_KEYS) {
+        for (const name of track[key]) names.add(name);
+      }
+    }
+  }
+  return [...names];
+}
+
+/**
+ * 履修ガイドの科目名一覧表に記載された単位数（出典: 2024年度履修ガイドP.21・
+ * 2026年度履修ガイドP.25の「単位」列）。ほぼ全科目が一律2単位のため、例外的に
+ * 異なる単位数の科目のみ個別指定し、それ以外はデフォルト2単位として扱う。
+ * このデフォルト値もPDFの記載を目視確認した上での値であり、推測ではない。
+ */
+const LEGACY_CREDIT_OVERRIDES: Record<string, number> = {
+  ゼミナールⅠ: 4,
+  ゼミナールⅡ: 4,
+  ゼミナールⅢ: 4,
+  ゼミナールⅣ: 4,
+};
+const CURRENT_CREDIT_OVERRIDES: Record<string, number> = {
+  あさひかわ学: 1,
+  EnglishCommunicationⅠ: 1,
+  EnglishCommunicationⅡ: 1,
+  EnglishCommunicationⅢ: 1,
+  専門演習Ⅰ: 4,
+  専門演習Ⅱ: 4,
+  卒業論文: 4,
+};
+
+function guideCreditsFor(name: string, entryYear: number): number {
+  const overrides = isLegacyCurriculum(entryYear) ? LEGACY_CREDIT_OVERRIDES : CURRENT_CREDIT_OVERRIDES;
+  return overrides[name] ?? 2;
+}
+
+/**
+ * スクレイピングで取得できなかった必修・選択必修科目を、履修ガイドの科目名一覧
+ * （出典: 2024年度・2026年度履修ガイド）から簡易的なCourseとして補う。
+ * 単位数のみ履修ガイドの表から直接取得した確定値（guideCreditsFor）を使い、
+ * それ以外の詳細（担当教員・開講曜日時限・評価方法等）はシラバスでしか分からない
+ * ため一切推測せず、シラバス検索で確認するよう案内文に明記する。
+ * `existingCourses`に同名の科目が既にある場合は生成しない（スクレイピング済みの
+ * 実データを簡易データで上書きしないため）。
+ */
+export function buildGuideFallbackCourses(
+  requirementSet: GraduationRequirementSet,
+  entryYear: number,
+  existingCourses: Course[]
+): Course[] {
+  const existingNames = new Set(existingCourses.map((c) => c.name));
+  const era = isLegacyCurriculum(entryYear) ? "legacy" : "current";
+  const seen = new Set<string>();
+  const result: Course[] = [];
+
+  for (const cat of requirementSet.categories) {
+    if (!cat.matchNames) continue;
+    for (const name of cat.matchNames) {
+      if (existingNames.has(name) || seen.has(name)) continue;
+      seen.add(name);
+      result.push({
+        id: `guide-${era}-${name}`,
+        name,
+        teacher: "（履修ガイド記載・担当教員はシラバス検索で確認してください）",
+        faculty: requirementSet.faculty,
+        department: requirementSet.department,
+        credits: guideCreditsFor(name, entryYear),
+        targetYears: [],
+        semester: "通年",
+        overview:
+          "履修ガイドの科目名一覧に掲載されている科目です。担当教員・開講曜日時限・評価方法などシラバスの詳細情報は未確認のため、大学ポータルへログインしてシラバス検索でご確認ください。",
+        evaluation: [],
+        keywords: [],
+        categoryKey: cat.label,
+        categoryGroup: cat.groupLabel,
+        source: "guide",
+        cachedAt: Date.now(),
+      });
+    }
+  }
+
+  return result;
+}
+
 export const SUPPORTED_ENTRY_YEARS = [2023, 2024, 2025, 2026] as const;
 
 /**

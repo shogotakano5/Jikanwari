@@ -3,9 +3,13 @@ import { normalizeQuery } from "./search";
 import {
   scrapeAllEconomicsCourses,
   scrapeCampusCourseWithDetail,
+  scrapeCampusSyllabusWithDiagnostics,
+  scrapeCoursesByNames,
   loginToCampusWeb,
   CampusWebAuthError,
   type CampusWebSession,
+  type SearchDiagnostics,
+  type NamedSearchProgress,
 } from "./scraping/asahikawa-scraper";
 import { ASAHIKAWA_SCRAPER_CONFIG, type ScrapedCourse } from "./scraping/scraper-config";
 import { unstable_cache } from "next/cache";
@@ -76,7 +80,7 @@ function nonEmpty(value: string | undefined): string | undefined {
  * detail（詳細ページのth/td）が無い場合は、rawText（検索結果行のテキスト）から
  * 曜日・時限・評価方法を可能な範囲で抽出する。
  */
-function mapScrapedCourseToCourse(scraped: ScrapedCourse): Course {
+export function mapScrapedCourseToCourse(scraped: ScrapedCourse): Course {
   const detail = scraped.detail;
   const dayPeriod =
     parseDayPeriod(detail?.["開講期・曜日・時限"]) ?? parseDayPeriod(scraped.rawText) ?? parseDayPeriod(`${scraped.day ?? ""}${scraped.period ?? ""}`);
@@ -220,5 +224,87 @@ export async function scrapeAllCourses(credentials?: CampusWebCredentials): Prom
             err instanceof Error ? err.message : String(err)
           }）。シラバス検索には大学ポータルへのログインが必要です。設定画面でログインID・パスワードを入力してから再度お試しください。搭載済みの130科目データはそのまま利用できます。`,
     };
+  }
+}
+
+export interface NamedSyncResult {
+  courses: Course[];
+  namesAttempted: number;
+  namesFound: number;
+  warning?: string;
+  authFailed?: boolean;
+}
+
+/**
+ * 履修ガイドに記載された必修・選択必修の科目名（全学共通・一般教育科目を含む）を
+ * 1件ずつ直接検索する。scrapeAllCourses（学年×曜日で「経営経済学科」所属に絞って
+ * 全件探索）だけでは、所属が異なる全学共通科目や、grade/day絞り込みフィールド名の
+ * 推測が外れて見つからない科目を取りこぼす可能性があるため、科目名の完全一致検索で
+ * 補完する。scraping-admin専用ページからのみ呼び出す想定（管理者用API）。
+ */
+export async function scrapeKnownRequiredCourses(
+  names: string[],
+  credentials: CampusWebCredentials,
+  onProgress?: (progress: NamedSearchProgress) => void
+): Promise<NamedSyncResult> {
+  let session: CampusWebSession;
+  try {
+    session = await loginToCampusWeb(credentials.userId, credentials.password);
+  } catch (err) {
+    if (err instanceof CampusWebAuthError) {
+      return { courses: [], namesAttempted: names.length, namesFound: 0, warning: err.message, authFailed: true };
+    }
+    return {
+      courses: [],
+      namesAttempted: names.length,
+      namesFound: 0,
+      warning: `大学ポータルへのログインに失敗しました（${err instanceof Error ? err.message : String(err)}）。`,
+    };
+  }
+
+  try {
+    const scraped = await scrapeCoursesByNames(names, ASAHIKAWA_SCRAPER_CONFIG.campusWeb.defaultYear, session, onProgress);
+    return { courses: scraped.map(mapScrapedCourseToCourse), namesAttempted: names.length, namesFound: scraped.length };
+  } catch (err) {
+    return {
+      courses: [],
+      namesAttempted: names.length,
+      namesFound: 0,
+      warning: `科目名検索に失敗しました（${err instanceof Error ? err.message : String(err)}）。`,
+    };
+  }
+}
+
+export interface DiagnosticSearchResult {
+  courses: Course[];
+  diagnostics?: SearchDiagnostics;
+  warning?: string;
+  authFailed?: boolean;
+}
+
+/**
+ * 検索結果が0件になる原因調査用。ログインしてから1回だけ検索を実行し、
+ * 生HTMLの診断情報（タイトル・ログイン画面らしさ・テーブル数・詳細リンク数・
+ * HTML先頭4000文字）を一緒に返す。scraping-admin専用ページのデバッグ表示で使う。
+ */
+export async function debugSearch(query: string, credentials: CampusWebCredentials): Promise<DiagnosticSearchResult> {
+  let session: CampusWebSession;
+  try {
+    session = await loginToCampusWeb(credentials.userId, credentials.password);
+  } catch (err) {
+    if (err instanceof CampusWebAuthError) {
+      return { courses: [], warning: err.message, authFailed: true };
+    }
+    return { courses: [], warning: `大学ポータルへのログインに失敗しました（${err instanceof Error ? err.message : String(err)}）。` };
+  }
+
+  try {
+    const { courses, diagnostics } = await scrapeCampusSyllabusWithDiagnostics(
+      { subjectName: query, year: ASAHIKAWA_SCRAPER_CONFIG.campusWeb.defaultYear, limit: 20 },
+      session
+    );
+    return { courses: courses.map(mapScrapedCourseToCourse), diagnostics };
+  } catch (err) {
+    return { courses: [], warning: `検索に失敗しました（${err instanceof Error ? err.message : String(err)}）。` };
   }
 }

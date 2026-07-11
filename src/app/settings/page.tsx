@@ -5,24 +5,14 @@ import { useAppData } from "@/contexts/AppDataContext";
 import { SUPPORTED_ENTRY_YEARS, findRequirementSet, TRACK_OPTIONS, trackLabel } from "@/lib/graduation-requirements";
 import { autoPlaceRequiredCoursesEverywhere } from "@/lib/timetable";
 import { fetchRealCoursesByYears } from "@/lib/real-course-import";
-import type { Course } from "@/types";
 import ElectiveRequiredDialog from "@/components/ElectiveRequiredDialog";
 
 const SYLLABUS_YEARS = [2023, 2024, 2025, 2026] as const;
-
-interface SyncResponse {
-  courses: Course[];
-  queriesAttempted: number;
-  queriesFailed: number;
-  warning?: string;
-}
 
 export default function SettingsPage() {
   const { settings, updateSettings, addCourses, courses, timetable, assignToTimetable } = useAppData();
   const [form, setForm] = useState(settings);
   const [saved, setSaved] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [autoPlaceMessage, setAutoPlaceMessage] = useState<string | null>(null);
   const [showElectiveDialog, setShowElectiveDialog] = useState(false);
   const [selectedYears, setSelectedYears] = useState<Set<number>>(
@@ -30,7 +20,6 @@ export default function SettingsPage() {
   );
   const [loadingYears, setLoadingYears] = useState(false);
   const [loadYearsMessage, setLoadYearsMessage] = useState<string | null>(null);
-  const [credentialsSaved, setCredentialsSaved] = useState(false);
 
   const entryYearOptions = SUPPORTED_ENTRY_YEARS;
 
@@ -62,39 +51,6 @@ export default function SettingsPage() {
           : "必修科目はすでに配置済みです。"
       );
       setShowElectiveDialog(true);
-    }
-  }
-
-  async function handleSaveCredentials() {
-    await updateSettings({ ...settings, campusUserId: form.campusUserId, campusPassword: form.campusPassword });
-    setCredentialsSaved(true);
-    setTimeout(() => setCredentialsSaved(false), 1500);
-  }
-
-  async function handleSync() {
-    setSyncing(true);
-    setSyncMessage(null);
-    try {
-      const res = await fetch("/api/syllabus/sync", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ userId: form.campusUserId, password: form.campusPassword }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: SyncResponse = await res.json();
-      if (data.courses.length > 0) {
-        await addCourses(data.courses);
-      }
-      const note =
-        data.courses.length > 0
-          ? `大学サイトから${data.courses.length}科目を取得し反映しました（学年×曜日ごとに検索した結果をまとめたものです）。`
-          : data.warning ?? "更新できる新しいデータはありませんでした。";
-      setSyncMessage(note);
-      await updateSettings({ ...form, lastSyllabusSyncNote: note });
-    } catch (e) {
-      setSyncMessage(e instanceof Error ? `更新に失敗しました: ${e.message}` : "更新に失敗しました");
-    } finally {
-      setSyncing(false);
     }
   }
 
@@ -280,63 +236,15 @@ export default function SettingsPage() {
       </div>
 
       <div className="mt-4 rounded-lg border border-zinc-200 p-3 text-xs text-zinc-500 dark:border-zinc-800">
-        <p className="font-semibold text-zinc-600 dark:text-zinc-400">大学ポータル（Campus-Xs）ログイン</p>
-        <p className="mt-1">
-          シラバス検索は大学ポータルへのログインが必須です。ここでログインID・パスワードを入力して保存すると、
-          「大学サイトから最新のシラバスを取得する」やシラバス検索のたびに自動でログインしてから取得します。
-        </p>
-        <p className="mt-1 text-zinc-400">
-          この認証情報は<strong className="font-semibold text-zinc-600 dark:text-zinc-300">この端末のブラウザ内（IndexedDB）にのみ保存</strong>されます。
-          取得リクエストのたびにこのアプリ自身のサーバーへ一時的に送信され、大学ポータルへのログインだけに使ったあと即座に破棄されます
-          （サーバー側のデータベース・キャッシュ・ログには一切保存しません）。入力しない場合は従来どおり未ログインでの取得を試みます。
-        </p>
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-          <label className="flex flex-1 flex-col gap-1">
-            ログインID（学籍番号等）
-            <input
-              value={form.campusUserId ?? ""}
-              onChange={(e) => setForm({ ...form, campusUserId: e.target.value })}
-              autoComplete="off"
-              className="rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            />
-          </label>
-          <label className="flex flex-1 flex-col gap-1">
-            パスワード
-            <input
-              type="password"
-              value={form.campusPassword ?? ""}
-              onChange={(e) => setForm({ ...form, campusPassword: e.target.value })}
-              autoComplete="off"
-              className="rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            />
-          </label>
-        </div>
-        <button
-          onClick={handleSaveCredentials}
-          className="mt-3 rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200"
-        >
-          {credentialsSaved ? "保存しました" : "ログイン情報を保存する"}
-        </button>
-      </div>
-
-      <div className="mt-4 rounded-lg border border-zinc-200 p-3 text-xs text-zinc-500 dark:border-zinc-800">
         <p className="font-semibold text-zinc-600 dark:text-zinc-400">データについて</p>
         <p className="mt-1">
           時間割・シラバス・履修状況・お気に入り・設定はすべてこの端末のブラウザ内（IndexedDB）に保存され、サーバーには送信されません。
-          シラバスは初めて検索した授業のみ大学サイトから取得し、以降はこの端末に保存されたデータを利用します。
         </p>
         {settings.lastSyllabusSyncNote && <p className="mt-2 font-medium text-zinc-600 dark:text-zinc-300">初期科目データ: {settings.lastSyllabusSyncNote}</p>}
-        <button
-          onClick={handleSync}
-          disabled={syncing}
-          className="mt-3 rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-200 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-200"
-        >
-          {syncing ? "大学サイトへ問い合わせ中..." : "大学サイトから最新のシラバスを取得する"}
-        </button>
-        {syncMessage && <p className="mt-2 text-zinc-600 dark:text-zinc-300">{syncMessage}</p>}
         <p className="mt-2 text-zinc-400">
-          学年（1〜4年）ごとに検索を行い、搭載済みの科目データへ追加・更新します。上でログイン情報を保存していない場合、
-          大学サイトの検索は未ログインでは実行できず失敗します（既存のデータは失われません）。
+          大学ポータルへのログインが必要なシラバスの一括取得は、このアプリの通常画面からは行えません
+          （学籍番号・パスワードの入力を一般利用画面に置かないための方針です）。管理者が別途スクレイピング専用ページから取り込んだ
+          データが、このアプリの初期科目データとして反映されます。
         </p>
       </div>
 

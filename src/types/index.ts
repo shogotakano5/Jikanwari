@@ -73,7 +73,12 @@ export interface Course {
    */
   categoryKey?: CategoryKey;
   categoryGroup?: string; // e.g. 選択必修グループ名 "選択必修A"
-  source: "scraped" | "manual"; // manual = 学生がシラバス検索に無い科目を手入力で登録したもの
+  /**
+   * scraped = 大学サイトのシラバス検索から取得。manual = 学生がシラバス検索に無い科目を
+   * 手入力で登録したもの。guide = 履修ガイドの科目名一覧から簡易登録したもの（担当教員・
+   * 開講時期などシラバスの詳細情報は未確認。単位数は履修ガイドの出典に基づく）。
+   */
+  source: "scraped" | "manual" | "guide";
   syllabusUrl?: string;
   cachedAt: number;
   offeredYears?: number[]; // 開講年度 (来年度開講のみ, etc.) — undefined = every year
@@ -129,14 +134,6 @@ export interface Settings {
   lastSyllabusSyncNote?: string;
   loadedSyllabusYears?: number[]; // Track which years' syllabus data have been imported
   selectedCourse?: Track; // 2年次以降に所属するコース（未選択の場合はeconomicsを既定値として扱う）
-  /**
-   * 大学ポータル(Campus-Xs)のログインID・パスワード。シラバス検索は学内認証必須のため、
-   * ここに保存しておくと大学サイトからの取得時に自動でログインする。
-   * この端末のブラウザ内（IndexedDB）にのみ保存され、サーバーへは同期取得リクエストの
-   * たびに一時的に送信されるのみで、サーバー側では一切保存・ログしない。
-   */
-  campusUserId?: string;
-  campusPassword?: string;
 }
 
 export interface FavoriteEntry {

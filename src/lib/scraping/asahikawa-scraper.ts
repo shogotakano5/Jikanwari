@@ -226,7 +226,42 @@ function chooseResultRows($: cheerio.CheerioAPI): cheerio.Cheerio<AnyNode> {
     const rows = $(selector).filter((_, row) => $(row).find(cfg.campusWeb.selectors.detailLink).length > 0);
     if (rows.length > 0) return rows;
   }
-  return $();
+  // フォールバック: 実際の結果テーブルの構造が想定と異なる場合に備え、
+  // 詳細リンク自身から近い行コンテナ(tr優先、無ければtd、無ければリンクの親)を辿る。
+  const links = $(cfg.campusWeb.selectors.detailLink);
+  if (links.length === 0) return $();
+  const rows = links
+    .map((_, link) => {
+      const $link = $(link);
+      const $tr = $link.closest("tr");
+      if ($tr.length > 0) return $tr.get(0);
+      const $parent = $link.parent();
+      return $parent.length > 0 ? $parent.get(0) : $link.get(0);
+    })
+    .get()
+    .filter((el): el is AnyNode => Boolean(el));
+  return $(rows);
+}
+
+/** 検索結果が0件だった場合に原因調査できるよう、レスポンスの診断情報を返す */
+export interface SearchDiagnostics {
+  status: number;
+  title: string;
+  looksLikeLoginPage: boolean;
+  tableCount: number;
+  detailLinkCount: number;
+  htmlSnippet: string;
+}
+
+function buildDiagnostics(status: number, html: string, $: cheerio.CheerioAPI): SearchDiagnostics {
+  return {
+    status,
+    title: normalizeText($("title").text()),
+    looksLikeLoginPage: $("body.camjnext-login, form[name='loginForm']").length > 0,
+    tableCount: $("table").length,
+    detailLinkCount: $(cfg.campusWeb.selectors.detailLink).length,
+    htmlSnippet: html.slice(0, 4000),
+  };
 }
 
 function parseCourseFromRow($: cheerio.CheerioAPI, row: AnyNode): ScrapedCourse | null {
@@ -303,7 +338,10 @@ function parseDetailTables($: cheerio.CheerioAPI): Record<string, string> {
   return detail;
 }
 
-export async function scrapeCampusSyllabus(input: CampusSearchInput = {}, session?: CampusWebSession): Promise<ScrapedCourse[]> {
+async function runCampusSyllabusSearch(
+  input: CampusSearchInput,
+  session: CampusWebSession | undefined
+): Promise<{ courses: ScrapedCourse[]; diagnostics: SearchDiagnostics }> {
   const searchUrl = absoluteUrl(cfg.campusWeb.baseUrl, cfg.campusWeb.searchPagePath);
 
   const formResponse = await politeFetch(searchUrl, {
@@ -355,7 +393,23 @@ export async function scrapeCampusSyllabus(input: CampusSearchInput = {}, sessio
     if (!unique.has(course.id)) unique.set(course.id, course);
   }
 
-  return [...unique.values()].slice(0, input.limit ?? 80);
+  return {
+    courses: [...unique.values()].slice(0, input.limit ?? 80),
+    diagnostics: buildDiagnostics(resultResponse.status, resultHtml, $result),
+  };
+}
+
+export async function scrapeCampusSyllabus(input: CampusSearchInput = {}, session?: CampusWebSession): Promise<ScrapedCourse[]> {
+  const { courses } = await runCampusSyllabusSearch(input, session);
+  return courses;
+}
+
+/** 検索結果が0件の原因調査用。生HTMLの診断情報も一緒に返す（admin用スクレイパーページで使用） */
+export async function scrapeCampusSyllabusWithDiagnostics(
+  input: CampusSearchInput = {},
+  session?: CampusWebSession
+): Promise<{ courses: ScrapedCourse[]; diagnostics: SearchDiagnostics }> {
+  return runCampusSyllabusSearch(input, session);
 }
 
 export async function scrapeCampusSyllabusDetail(
@@ -409,6 +463,40 @@ export async function scrapeAllEconomicsCourses(year = cfg.campusWeb.defaultYear
         if (!seen.has(course.id)) seen.set(course.id, course);
       }
     }
+  }
+
+  return [...seen.values()];
+}
+
+export interface NamedSearchProgress {
+  done: number;
+  total: number;
+  name: string;
+  found: number;
+}
+
+/**
+ * 科目名の完全一致リストを1件ずつ検索する。全学共通・一般教育科目は「経営経済学科」
+ * という所属フィルタの対象外である可能性が高く、所属ラベルを推測するより
+ * 科目名で直接検索するほうが確実（履修ガイドで科目名が判明している必修・
+ * 選択必修科目はこの方法で網羅できる）。学年・曜日を指定しないため、
+ * 全学年・全曜日にまたがる科目も取りこぼさない。
+ */
+export async function scrapeCoursesByNames(
+  names: string[],
+  year: number,
+  session?: CampusWebSession,
+  onProgress?: (progress: NamedSearchProgress) => void
+): Promise<ScrapedCourse[]> {
+  const seen = new Map<string, ScrapedCourse>();
+
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    const courses = await scrapeCampusCourseWithDetail({ year, subjectName: name, limit: 5 }, session).catch(() => []);
+    for (const course of courses) {
+      if (!seen.has(course.id)) seen.set(course.id, course);
+    }
+    onProgress?.({ done: i + 1, total: names.length, name, found: seen.size });
   }
 
   return [...seen.values()];
