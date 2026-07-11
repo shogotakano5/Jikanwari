@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import type { Course, TimetableEntry, CompletedCourse, FavoriteEntry, Settings, Grade, Term, CourseStatus } from "@/types";
+import type { Course, TimetableEntry, CompletedCourse, FavoriteEntry, Settings, Grade, Term, CourseStatus, ExamNote } from "@/types";
 import * as db from "@/lib/db";
 import { DEFAULT_SETTINGS } from "@/lib/db";
 
@@ -11,12 +11,14 @@ interface AppDataState {
   timetable: TimetableEntry[];
   completed: CompletedCourse[];
   favorites: FavoriteEntry[];
+  examNotes: ExamNote[];
   settings: Settings;
 }
 
 interface AppDataContextValue extends AppDataState {
   courseById: Map<string, Course>;
   statusByCourseId: Map<string, CourseStatus>;
+  examNoteByCourseId: Map<string, ExamNote>;
   refreshCourses: () => Promise<void>;
   addCourses: (courses: Course[]) => Promise<void>;
   assignToTimetable: (grade: Grade, term: Term, day: TimetableEntry["day"], period: TimetableEntry["period"], courseId: string) => Promise<void>;
@@ -25,6 +27,7 @@ interface AppDataContextValue extends AppDataState {
   clearCourseStatus: (courseId: string) => Promise<void>;
   toggleFavorite: (courseId: string) => Promise<void>;
   updateSettings: (settings: Settings) => Promise<void>;
+  setExamNote: (courseId: string, examDate: string, reportDue: string) => Promise<void>;
 }
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
@@ -40,18 +43,20 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     timetable: [],
     completed: [],
     favorites: [],
+    examNotes: [],
     settings: DEFAULT_SETTINGS,
   });
 
   const loadAll = useCallback(async () => {
-    const [courses, timetable, completed, favorites, settings] = await Promise.all([
+    const [courses, timetable, completed, favorites, examNotes, settings] = await Promise.all([
       db.getAllCourses(),
       db.getTimetable(),
       db.getCompletedCourses(),
       db.getFavorites(),
+      db.getExamNotes(),
       db.getSettings(),
     ]);
-    setState({ ready: true, courses, timetable, completed, favorites, settings });
+    setState({ ready: true, courses, timetable, completed, favorites, examNotes, settings });
   }, []);
 
   useEffect(() => {
@@ -114,13 +119,24 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setState((s) => ({ ...s, settings }));
   }, []);
 
+  const setExamNote = useCallback(async (courseId: string, examDate: string, reportDue: string) => {
+    const note = { courseId, examDate: examDate || undefined, reportDue: reportDue || undefined, updatedAt: Date.now() };
+    await db.setExamNote(note);
+    setState((s) => ({
+      ...s,
+      examNotes: note.examDate || note.reportDue ? [...s.examNotes.filter((n) => n.courseId !== courseId), note] : s.examNotes.filter((n) => n.courseId !== courseId),
+    }));
+  }, []);
+
   const courseById = useMemo(() => new Map(state.courses.map((c) => [c.id, c])), [state.courses]);
   const statusByCourseId = useMemo(() => new Map(state.completed.map((c) => [c.courseId, c.status])), [state.completed]);
+  const examNoteByCourseId = useMemo(() => new Map(state.examNotes.map((n) => [n.courseId, n])), [state.examNotes]);
 
   const value: AppDataContextValue = {
     ...state,
     courseById,
     statusByCourseId,
+    examNoteByCourseId,
     refreshCourses,
     addCourses,
     assignToTimetable,
@@ -129,6 +145,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     clearCourseStatus,
     toggleFavorite,
     updateSettings,
+    setExamNote,
   };
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;

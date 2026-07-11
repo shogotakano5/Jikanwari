@@ -14,7 +14,12 @@ export type Grade = (typeof GRADES)[number];
 
 export type CategoryKey = "必修" | "選択必修" | "選択" | "自由選択";
 
-/** 必修/選択必修等の履修区分(mandatory-ness)とは別軸の科目群分類 */
+/**
+ * 必修/選択必修等の履修区分(mandatory-ness)とは別軸の科目群分類。
+ * 入学年度によって判定方法が異なるため、Courseの静的フィールドとしては
+ * 持たず、`getSubjectGroup(course, entryYear)`(src/lib/subject-group.ts)で
+ * 都度動的に判定する。
+ */
 export type SubjectGroup = "基幹科目" | "総合科目";
 
 export type CourseStatus = "completed" | "inProgress" | "planned";
@@ -60,9 +65,7 @@ export interface Course {
    */
   categoryKey?: CategoryKey;
   categoryGroup?: string; // e.g. 選択必修グループ名 "選択必修A"
-  /** 科目名に「基幹科目群」「総合科目群」等の明示がある場合のみ設定される（推測しない） */
-  subjectGroup?: SubjectGroup;
-  source: "scraped";
+  source: "scraped" | "manual"; // manual = 学生がシラバス検索に無い科目を手入力で登録したもの
   syllabusUrl?: string;
   cachedAt: number;
   offeredYears?: number[]; // 開講年度 (来年度開講のみ, etc.) — undefined = every year
@@ -123,4 +126,12 @@ export interface Settings {
 export interface FavoriteEntry {
   courseId: string;
   addedAt: number;
+}
+
+/** 科目ごとの試験日・レポート期限のメモ（学生が任意で入力、Courseとは別ストアで保持） */
+export interface ExamNote {
+  courseId: string;
+  examDate?: string; // ISO date (yyyy-mm-dd)
+  reportDue?: string; // ISO date (yyyy-mm-dd)
+  updatedAt: number;
 }

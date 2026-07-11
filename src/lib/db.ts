@@ -1,9 +1,9 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
-import type { Course, TimetableEntry, CompletedCourse, FavoriteEntry, Settings } from "@/types";
+import type { Course, TimetableEntry, CompletedCourse, FavoriteEntry, Settings, ExamNote } from "@/types";
 import { fetchRealCourseSeed } from "./real-course-import";
 
 const DB_NAME = "jikanwari";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 interface JikanwariDB extends DBSchema {
   courses: {
@@ -26,6 +26,10 @@ interface JikanwariDB extends DBSchema {
   settings: {
     key: string;
     value: Settings;
+  };
+  examNotes: {
+    key: string;
+    value: ExamNote;
   };
 }
 
@@ -62,6 +66,9 @@ export function getDB(): Promise<IDBPDatabase<JikanwariDB>> {
         if (!db.objectStoreNames.contains("settings")) {
           db.createObjectStore("settings", { keyPath: "id" });
         }
+        if (!db.objectStoreNames.contains("examNotes")) {
+          db.createObjectStore("examNotes", { keyPath: "courseId" });
+        }
         // v1->v2: timetableのキー形式が `day-period` から `grade-term-day-period` に、
         // graduationの値に status フィールドが追加された。古い形式のデータは
         // 意味が変わってしまうため、開発初期段階につき単純にクリアする。
@@ -78,9 +85,13 @@ export function getDB(): Promise<IDBPDatabase<JikanwariDB>> {
           db.clear("courses");
         }
         // v4->v5: Course.subjectGroup(基幹科目/総合科目)を追加したため再投入する。
+        // その後subjectGroupは静的フィールドから削除し、getSubjectGroup()による
+        // 入学年度別の動的判定に変更したため、このバージョンでの再投入は不要になった。
         if (oldVersion < 5 && oldVersion > 0) {
           db.clear("courses");
         }
+        // v5->v6: examNotesストア(試験日/レポート期限のメモ)を追加。新規ストアの
+        // 追加のみで既存データの形式は変わらないため、再投入は不要。
       },
     }).then(async (db) => {
       await seedIfEmpty(db);
@@ -196,6 +207,21 @@ export async function toggleFavorite(courseId: string): Promise<boolean> {
   }
   await db.put("favorites", { courseId, addedAt: Date.now() });
   return true;
+}
+
+// ---- Exam notes (試験日・レポート期限) ----
+export async function getExamNotes(): Promise<ExamNote[]> {
+  const db = await getDB();
+  return db.getAll("examNotes");
+}
+
+export async function setExamNote(note: ExamNote): Promise<void> {
+  const db = await getDB();
+  if (!note.examDate && !note.reportDue) {
+    await db.delete("examNotes", note.courseId);
+    return;
+  }
+  await db.put("examNotes", note);
 }
 
 // ---- Settings ----

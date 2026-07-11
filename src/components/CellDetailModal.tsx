@@ -4,8 +4,10 @@ import { useMemo, useState } from "react";
 import type { CourseStatus, Grade, Period, Term, Weekday } from "@/types";
 import { useAppData, timetableSlotId } from "@/contexts/AppDataContext";
 import { findRequirementSet, classifyCourse } from "@/lib/graduation-requirements";
+import { getSubjectGroup } from "@/lib/subject-group";
 import { gradeMatchesCourse, termMatchesSemester } from "@/lib/timetable";
 import CourseCard from "./CourseCard";
+import ManualCourseDialog from "./ManualCourseDialog";
 
 interface Props {
   grade: Grade;
@@ -21,14 +23,17 @@ export default function CellDetailModal({ grade, term, day, period, onClose }: P
     timetable,
     favorites,
     statusByCourseId,
+    examNoteByCourseId,
     assignToTimetable,
     removeFromTimetable,
     setCourseStatus,
     clearCourseStatus,
     toggleFavorite,
+    setExamNote,
     settings,
   } = useAppData();
   const [busy, setBusy] = useState(false);
+  const [showManualDialog, setShowManualDialog] = useState(false);
 
   const requirementSet = useMemo(
     () => findRequirementSet(settings.entryYear, settings.faculty, settings.department),
@@ -89,6 +94,7 @@ export default function CellDetailModal({ grade, term, day, period, onClose }: P
             <CourseCard
               course={assignedCourse}
               categoryLabel={categoryLabelFor(assignedCourse.id)}
+              subjectGroup={getSubjectGroup(assignedCourse, settings.entryYear)}
               isAssigned
               status={statusByCourseId.get(assignedCourse.id)}
               isFavorite={favoriteIds.has(assignedCourse.id)}
@@ -101,14 +107,27 @@ export default function CellDetailModal({ grade, term, day, period, onClose }: P
               onSetStatus={(status: CourseStatus) => setCourseStatus(assignedCourse.id, status, settings.entryYear, assignedCourse.credits)}
               onClearStatus={() => clearCourseStatus(assignedCourse.id)}
               onToggleFavorite={() => toggleFavorite(assignedCourse.id)}
+              examDate={examNoteByCourseId.get(assignedCourse.id)?.examDate}
+              reportDue={examNoteByCourseId.get(assignedCourse.id)?.reportDue}
+              onSetExamNote={(examDate, reportDue) => setExamNote(assignedCourse.id, examDate, reportDue)}
             />
           </div>
         )}
 
         <div>
-          <p className="mb-1 text-xs font-semibold text-zinc-400">
-            {assignedCourse ? "他の候補（この曜日・時限に開講）" : "この曜日・時限に開講している授業候補"}
-          </p>
+          <div className="mb-1 flex items-center justify-between">
+            <p className="text-xs font-semibold text-zinc-400">
+              {assignedCourse ? "他の候補（この曜日・時限に開講）" : "この曜日・時限に開講している授業候補"}
+            </p>
+            {!assignedCourse && (
+              <button
+                onClick={() => setShowManualDialog(true)}
+                className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+              >
+                手入力で追加
+              </button>
+            )}
+          </div>
           {candidates.length === 0 ? (
             <p className="py-4 text-center text-sm text-zinc-400">候補となる授業がありません</p>
           ) : (
@@ -118,11 +137,15 @@ export default function CellDetailModal({ grade, term, day, period, onClose }: P
                   key={c.id}
                   course={c}
                   categoryLabel={categoryLabelFor(c.id)}
+                  subjectGroup={getSubjectGroup(c, settings.entryYear)}
                   isAssigned={false}
                   status={statusByCourseId.get(c.id)}
                   isFavorite={favoriteIds.has(c.id)}
                   onAssign={() => runAssign(c.id)}
                   onToggleFavorite={() => toggleFavorite(c.id)}
+                  examDate={examNoteByCourseId.get(c.id)?.examDate}
+                  reportDue={examNoteByCourseId.get(c.id)?.reportDue}
+                  onSetExamNote={(examDate, reportDue) => setExamNote(c.id, examDate, reportDue)}
                 />
               ))}
             </div>
@@ -130,6 +153,9 @@ export default function CellDetailModal({ grade, term, day, period, onClose }: P
         </div>
         {busy && <p className="mt-2 text-center text-xs text-zinc-400">更新中...</p>}
       </div>
+      {showManualDialog && (
+        <ManualCourseDialog grade={grade} term={term} day={day} period={period} onClose={() => setShowManualDialog(false)} />
+      )}
     </div>
   );
 }

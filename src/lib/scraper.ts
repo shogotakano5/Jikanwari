@@ -1,4 +1,4 @@
-import type { Course, EvaluationItem, Period, Semester, SubjectGroup, Weekday } from "@/types";
+import type { Course, EvaluationItem, Period, Semester, Weekday } from "@/types";
 import { normalizeQuery } from "./search";
 import {
   scrapeAllEconomicsCourses,
@@ -59,12 +59,6 @@ function nonEmpty(value: string | undefined): string | undefined {
   return value && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-function parseSubjectGroup(name: string): SubjectGroup | undefined {
-  if (name.startsWith("基幹科目群")) return "基幹科目";
-  if (name.startsWith("総合科目群")) return "総合科目";
-  return undefined;
-}
-
 /**
  * src/lib/scraping/asahikawa-scraper.ts が返す ScrapedCourse（実サイトの検索結果・
  * 詳細ページのtable行をほぼそのまま保持した形）を、アプリ内部のCourse型へ変換する。
@@ -99,8 +93,8 @@ function mapScrapedCourseToCourse(scraped: ScrapedCourse): Course {
     textbook: nonEmpty(detail?.["教科書"]),
     references: nonEmpty(detail?.["参考書"]),
     keywords: [],
-    subjectGroup: parseSubjectGroup(scraped.name),
     // categoryKeyは付けない: classifyCourse()が科目名から必修/選択必修A〜Eを自動判定する
+    // subjectGroupも付けない: getSubjectGroup()が入学年度に応じて動的に判定する
     source: "scraped",
     syllabusUrl: scraped.syllabusUrl,
     cachedAt: Date.now(),

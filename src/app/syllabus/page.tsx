@@ -4,11 +4,13 @@ import { useMemo, useState } from "react";
 import { useAppData } from "@/contexts/AppDataContext";
 import { searchCourses, normalizeQuery } from "@/lib/search";
 import { findRequirementSet, classifyCourse } from "@/lib/graduation-requirements";
+import { getSubjectGroup } from "@/lib/subject-group";
 import { WEEKDAYS, PERIODS, GRADES, type Course, type CourseStatus } from "@/types";
 import CourseCard from "@/components/CourseCard";
 
 export default function SyllabusSearchPage() {
-  const { courses, addCourses, favorites, toggleFavorite, statusByCourseId, setCourseStatus, clearCourseStatus, settings } = useAppData();
+  const { courses, addCourses, favorites, toggleFavorite, statusByCourseId, setCourseStatus, clearCourseStatus, examNoteByCourseId, setExamNote, settings } =
+    useAppData();
   const [query, setQuery] = useState("");
   const [day, setDay] = useState("");
   const [period, setPeriod] = useState("");
@@ -33,8 +35,8 @@ export default function SyllabusSearchPage() {
       period: period ? Number(period) : undefined,
     }).map((r) => r.course);
     const byGrade = grade ? base.filter((c) => c.targetYears.length === 0 || c.targetYears.includes(Number(grade))) : base;
-    return subjectGroup ? byGrade.filter((c) => c.subjectGroup === subjectGroup) : byGrade;
-  }, [courses, query, day, period, grade, subjectGroup]);
+    return subjectGroup ? byGrade.filter((c) => getSubjectGroup(c, settings.entryYear) === subjectGroup) : byGrade;
+  }, [courses, query, day, period, grade, subjectGroup, settings.entryYear]);
 
   const results = remoteResults ?? localResults;
 
@@ -144,11 +146,15 @@ export default function SyllabusSearchPage() {
               key={course.id}
               course={course}
               categoryLabel={requirementSet ? classifyCourse(course, requirementSet).groupLabel ?? classifyCourse(course, requirementSet).label : undefined}
+              subjectGroup={getSubjectGroup(course, settings.entryYear)}
               status={statusByCourseId.get(course.id)}
               isFavorite={favoriteIds.has(course.id)}
               onToggleFavorite={() => toggleFavorite(course.id)}
               onSetStatus={(status: CourseStatus) => setCourseStatus(course.id, status, settings.entryYear, course.credits)}
               onClearStatus={() => clearCourseStatus(course.id)}
+              examDate={examNoteByCourseId.get(course.id)?.examDate}
+              reportDue={examNoteByCourseId.get(course.id)?.reportDue}
+              onSetExamNote={(examDate, reportDue) => setExamNote(course.id, examDate, reportDue)}
             />
           ))
         )}

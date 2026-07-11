@@ -3,11 +3,13 @@
 import { useMemo } from "react";
 import { useAppData } from "@/contexts/AppDataContext";
 import { findRequirementSet, classifyCourse } from "@/lib/graduation-requirements";
+import { getSubjectGroup } from "@/lib/subject-group";
 import type { CourseStatus } from "@/types";
 import CourseCard from "@/components/CourseCard";
 
 export default function FavoritesPage() {
-  const { favorites, courses, toggleFavorite, statusByCourseId, setCourseStatus, clearCourseStatus, settings } = useAppData();
+  const { favorites, courses, toggleFavorite, statusByCourseId, setCourseStatus, clearCourseStatus, examNoteByCourseId, setExamNote, settings } =
+    useAppData();
 
   const requirementSet = useMemo(
     () => findRequirementSet(settings.entryYear, settings.faculty, settings.department),
@@ -32,11 +34,15 @@ export default function FavoritesPage() {
               key={course.id}
               course={course}
               categoryLabel={requirementSet ? classifyCourse(course, requirementSet).groupLabel ?? classifyCourse(course, requirementSet).label : undefined}
+              subjectGroup={getSubjectGroup(course, settings.entryYear)}
               status={statusByCourseId.get(course.id)}
               isFavorite
               onToggleFavorite={() => toggleFavorite(course.id)}
               onSetStatus={(status: CourseStatus) => setCourseStatus(course.id, status, settings.entryYear, course.credits)}
               onClearStatus={() => clearCourseStatus(course.id)}
+              examDate={examNoteByCourseId.get(course.id)?.examDate}
+              reportDue={examNoteByCourseId.get(course.id)?.reportDue}
+              onSetExamNote={(examDate, reportDue) => setExamNote(course.id, examDate, reportDue)}
             />
           ))
         )}

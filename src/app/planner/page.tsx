@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useAppData } from "@/contexts/AppDataContext";
 import { findRequirementSet, judgeGraduation, classifyCourse } from "@/lib/graduation-requirements";
 import { autoPlaceRequiredCourses, gradeMatchesCourse, termMatchesSemester } from "@/lib/timetable";
+import { getSubjectGroup } from "@/lib/subject-group";
 import { GRADES, TERMS, type Grade, type Term } from "@/types";
 import CourseCard from "@/components/CourseCard";
 import ElectiveRequiredDialog from "@/components/ElectiveRequiredDialog";
@@ -139,6 +140,7 @@ export default function PlannerPage() {
                   key={c.id}
                   course={c}
                   categoryLabel={requirementSet ? classifyCourse(c, requirementSet).groupLabel ?? classifyCourse(c, requirementSet).label : undefined}
+                  subjectGroup={getSubjectGroup(c, settings.entryYear)}
                   status={statusByCourseId.get(c.id)}
                   isFavorite={favoriteIds.has(c.id)}
                   onAssign={() => assignChoice(c.id, c.day, c.period)}
