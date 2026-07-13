@@ -3,7 +3,7 @@ import type { Course, TimetableEntry, CompletedCourse, FavoriteEntry, Settings, 
 import { fetchRealCourseSeed } from "./real-course-import";
 
 const DB_NAME = "jikanwari";
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 interface JikanwariDB extends DBSchema {
   courses: {
@@ -93,6 +93,13 @@ export function getDB(): Promise<IDBPDatabase<JikanwariDB>> {
         }
         // v5->v6: examNotesストア(試験日/レポート期限のメモ)を追加。新規ストアの
         // 追加のみで既存データの形式は変わらないため、再投入は不要。
+        // v6->v7: 科目データのHTML断片・JS断片の除去（public/data/*.jsonのクリーニング
+        // と取り込み時サニタイズ）、配当学年の補完（取得元検索条件からの復元）、
+        // 架空ゼミナールプレースホルダーの廃止に伴い、クリーニング済みデータで
+        // coursesストアを再投入する。
+        if (oldVersion < 7 && oldVersion > 0) {
+          db.clear("courses");
+        }
       },
     }).then(async (db) => {
       await seedIfEmpty(db);

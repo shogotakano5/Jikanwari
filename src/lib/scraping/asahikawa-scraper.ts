@@ -432,7 +432,8 @@ function parseCourseFromRow($: cheerio.CheerioAPI, row: AnyNode): ScrapedCourse 
     .get()
     .filter(Boolean);
 
-  const name = normalizeText(linkEl.text()) || cells.find((cell) => /[一-龠ぁ-んァ-ヶA-Za-z]/.test(cell)) || "名称未取得";
+  const name =
+    sanitizeDetailText(normalizeText(linkEl.text())) || cells.find((cell) => /[一-龠ぁ-んァ-ヶA-Za-z]/.test(cell)) || "名称未取得";
   const rawText = normalizeText($row.text());
 
   const id = [yearText, lectureCode, curriculumCode].filter(Boolean).join("-") || syllabusUrl;
@@ -451,8 +452,34 @@ function parseCourseFromRow($: cheerio.CheerioAPI, row: AnyNode): ScrapedCourse 
   };
 }
 
+/**
+ * 詳細ページのセルテキストに混入するゴミを除去する。
+ * シラバス詳細ページは本文を <script> 内のJS（`jq$(function(){ var subjectCon = "本文"; ... });`）
+ * で埋め込んでおり、cheerioの .text() は <script> の中身もテキストとして含めるため、
+ * スキャフォールディングを捨てて本文だけを取り出す。テキスト化されて残った
+ * HTMLタグ・コメント・実体参照も除去する（2023〜2025年度データで実際に混入していた形）。
+ */
+function sanitizeDetailText(value: string): string {
+  return value
+    .replace(/jq\$\(function\(\)\{[\s\S]*?\}\);?/g, (block) => {
+      const m = block.match(/var\s+\w+\s*=\s*"([\s\S]*?)";/);
+      return m ? `${m[1]} ` : "";
+    })
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<\/?[a-zA-Z][^>]*(>|$)/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&quot;/gi, '"')
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function parseDetailTables($: cheerio.CheerioAPI): Record<string, string> {
   const detail: Record<string, string> = {};
+
+  // cheerioの.text()は<script>/<style>の中身もテキストとして含めてしまうため、
+  // 表示に混入するJS断片・CSSの元を先にDOMごと取り除く。
+  $("script, style, noscript").remove();
 
   $(cfg.campusWeb.selectors.detailTables).each((_, table) => {
     $(table)
@@ -466,7 +493,7 @@ function parseDetailTables($: cheerio.CheerioAPI): Record<string, string> {
           .filter(Boolean);
 
         if (th && tds.length > 0) {
-          detail[th] = tds.join(" / ");
+          detail[th] = sanitizeDetailText(tds.join(" / "));
           return;
         }
 
@@ -476,7 +503,7 @@ function parseDetailTables($: cheerio.CheerioAPI): Record<string, string> {
           .get()
           .filter(Boolean);
         if (cells.length >= 2 && cells[0].length <= 40) {
-          detail[cells[0]] = cells.slice(1).join(" / ");
+          detail[cells[0]] = sanitizeDetailText(cells.slice(1).join(" / "));
         }
       });
   });
@@ -611,7 +638,9 @@ export async function scrapeAllEconomicsCourses(year = cfg.campusWeb.defaultYear
       ).catch(() => []);
 
       for (const course of courses) {
-        if (!seen.has(course.id)) seen.set(course.id, course);
+        // 学年指定検索でヒットした事実を配当学年の補完用に保持する
+        // （一覧ページには配当学年が出ないため、詳細ページ未取得時の唯一の手掛かり）
+        if (!seen.has(course.id)) seen.set(course.id, { ...course, sourceGrade: grade });
       }
     }
   }

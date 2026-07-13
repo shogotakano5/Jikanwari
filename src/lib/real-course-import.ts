@@ -60,10 +60,55 @@ function parseDay(raw: string): Weekday | undefined {
   return (WEEKDAYS as string[]).includes(raw) ? (raw as Weekday) : undefined;
 }
 
-function parseTargetYears(gradeText: string | undefined): number[] {
-  if (!gradeText) return [];
-  const matches = gradeText.match(/[1-4]/g);
-  return matches ? Array.from(new Set(matches.map(Number))) : [];
+/**
+ * 配当学年をパースする。「配当学年」フィールドが空の科目は、元データ収集時の
+ * 検索条件（raw["取得元検索条件"] = "grade1"〜"grade4"）から配当学年を復元する
+ * （学年指定で検索してヒットした科目はその学年の配当科目）。曜日検索（"day1"等）
+ * でのみヒットした科目は学年不明のため空のまま＝全学年の候補として扱う。
+ */
+function parseTargetYears(gradeText: string | undefined, sourceQuery?: string): number[] {
+  if (gradeText) {
+    const matches = gradeText.match(/[1-4]/g);
+    if (matches) return Array.from(new Set(matches.map(Number)));
+  }
+  const gradeQuery = sourceQuery?.match(/^grade([1-4])$/);
+  if (gradeQuery) return [Number(gradeQuery[1])];
+  return [];
+}
+
+/**
+ * スクレイピング由来のテキストに残っている可能性のあるゴミを除去する
+ * （scripts/clean-course-data.mjs と同等の処理の取り込み時セーフティネット）。
+ * - 本文をJSで埋め込むシラバス詳細ページ由来の `jq$(function(){ var subjectCon = "本文"; ... });`
+ * - HTMLタグ・HTMLコメント・実体参照
+ */
+function sanitizeScrapedText(value: string | undefined): string {
+  if (!value) return "";
+  return value
+    .replace(/jq\$\(function\(\)\{[\s\S]*?\}\);?/g, (block) => {
+      const m = block.match(/var\s+\w+\s*=\s*"([\s\S]*?)";/);
+      return m ? `${m[1]}\n` : "";
+    })
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|tr|li|ul|ol|h[1-6])>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "・")
+    .replace(/<\/?[a-zA-Z][^>]*(>|$)/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&quot;/gi, '"')
+    .replace(/&amp;/gi, "&")
+    .replace(/\r/g, "")
+    .replace(/[ \t　]+\n/g, "\n")
+    .replace(/\n[ \t　]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** 科目名・教員名など1行であるべきフィールド用: タグ除去に加えて改行・連続空白を単一スペースへ潰す */
+function sanitizeInlineText(value: string | undefined): string {
+  return sanitizeScrapedText(value).replace(/\s+/g, " ").trim();
 }
 
 function buildEvaluation(raw: RawCourseRecord["evaluation"]): EvaluationItem[] {
@@ -80,25 +125,25 @@ export function mapRawCourseToCourse(raw: RawCourseRecord): Course {
   const rawFields = raw.raw ?? {};
   return {
     id: raw.id,
-    name: raw.name,
-    teacher: raw.teacher || "未設定",
-    faculty: raw.faculty || "経済学部",
-    department: raw.department || nonEmpty(rawFields["対象学科"]) || "経営経済学科",
+    name: sanitizeInlineText(raw.name) || raw.id,
+    teacher: sanitizeInlineText(raw.teacher) || "未設定",
+    faculty: sanitizeInlineText(raw.faculty) || "経済学部",
+    department: sanitizeInlineText(raw.department) || nonEmpty(rawFields["対象学科"]) || "経営経済学科",
     credits: Math.round(raw.credits) || 2,
-    targetYears: parseTargetYears(rawFields["配当学年"]),
+    targetYears: parseTargetYears(rawFields["配当学年"], rawFields["取得元検索条件"]),
     syllabusYear: raw.year || undefined,
-    semester: parseSemester(raw.semester),
-    day: parseDay(raw.day),
-    period: zenkakuDigitsToNumber(raw.period) as Period | undefined,
-    overview: raw.description || "",
-    goals: nonEmpty(raw.goals),
-    prerequisites: nonEmpty(raw.prerequisites),
+    semester: parseSemester(sanitizeInlineText(raw.semester)),
+    day: parseDay(sanitizeInlineText(raw.day)),
+    period: zenkakuDigitsToNumber(sanitizeInlineText(raw.period)) as Period | undefined,
+    overview: sanitizeScrapedText(raw.description),
+    goals: nonEmpty(sanitizeScrapedText(raw.goals)),
+    prerequisites: nonEmpty(sanitizeScrapedText(raw.prerequisites)),
     courseNumbering: nonEmpty(rawFields["科目ナンバリング"]),
-    syllabusPlan: nonEmpty(rawFields["授業計画"]),
-    evaluationNotes: nonEmpty(rawFields["評価方法・基準"]),
+    syllabusPlan: nonEmpty(sanitizeScrapedText(rawFields["授業計画"])),
+    evaluationNotes: nonEmpty(sanitizeScrapedText(rawFields["評価方法・基準"])),
     evaluation: buildEvaluation(raw.evaluation),
-    textbook: nonEmpty(rawFields["教科書"]),
-    references: nonEmpty(rawFields["参考書"]),
+    textbook: nonEmpty(sanitizeScrapedText(rawFields["教科書"])),
+    references: nonEmpty(sanitizeScrapedText(rawFields["参考書"])),
     keywords: [],
     // categoryKeyは付けない: classifyCourse()が科目名から必修/選択必修A〜Eを自動判定する
     // subjectGroupも付けない: getSubjectGroup()が入学年度に応じて動的に判定する
@@ -133,30 +178,9 @@ export async function fetchRealCoursesByYears(years: number[]): Promise<Course[]
     }
   }
 
-  // Add placeholder seminar courses for grades 1-4 to help students plan ahead
-  for (const grade of [1, 2, 3, 4]) {
-    const placeholderId = `seminar-placeholder-grade${grade}`;
-    if (!uniqueIds.has(placeholderId)) {
-      uniqueIds.add(placeholderId);
-      courses.push({
-        id: placeholderId,
-        name: `ゼミナール（${grade}年）`,
-        teacher: "未定",
-        faculty: "経済学部",
-        department: "経営経済学科",
-        credits: 4,
-        targetYears: [grade],
-        semester: "通年",
-        day: "火",
-        period: grade === 3 ? 4 : grade === 4 ? 5 : 6,
-        overview: `${grade}年次のゼミナール履修計画用プレースホルダー。実際のゼミナール担当教員の科目に置き換えてください。`,
-        evaluation: [],
-        keywords: [],
-        source: "scraped",
-        cachedAt: Date.now(),
-      });
-    }
-  }
+  // ※以前ここで生成していた架空のゼミナールプレースホルダー（曜日時限を推測した
+  // 「ゼミナール（N年）」）は廃止した。ゼミナールⅠ〜Ⅳは実データ（担当教員別）と
+  // buildGuideFallbackCourses()の履修ガイド由来の簡易データでカバーされる。
 
   return courses;
 }

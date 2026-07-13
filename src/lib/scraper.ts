@@ -65,11 +65,15 @@ function parseSemester(detail: Record<string, string> | undefined, rawText: stri
   return "通年";
 }
 
-function parseTargetYears(detail: Record<string, string> | undefined): number[] {
+function parseTargetYears(detail: Record<string, string> | undefined, sourceGrade?: number): number[] {
   const text = detail?.["配当学年"];
-  if (!text) return [];
-  const matches = text.match(/[1-4]/g);
-  return matches ? Array.from(new Set(matches.map(Number))) : [];
+  if (text) {
+    const matches = text.match(/[1-4]/g);
+    if (matches) return Array.from(new Set(matches.map(Number)));
+  }
+  // 詳細ページ未取得（全件同期）の場合は、学年指定検索でヒットした学年で補完する
+  if (sourceGrade && sourceGrade >= 1 && sourceGrade <= 4) return [sourceGrade];
+  return [];
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
@@ -95,7 +99,7 @@ export function mapScrapedCourseToCourse(scraped: ScrapedCourse): Course {
     faculty: "経済学部",
     department: scraped.department || ASAHIKAWA_SCRAPER_CONFIG.campusWeb.departmentLabel,
     credits: Number(scraped.credits ?? detail?.["単位"]) || 2,
-    targetYears: parseTargetYears(detail),
+    targetYears: parseTargetYears(detail, scraped.sourceGrade),
     syllabusYear: scraped.year,
     semester: parseSemester(detail, scraped.rawText),
     day: dayPeriod?.day,

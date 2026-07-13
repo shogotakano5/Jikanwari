@@ -183,6 +183,33 @@ const CURRENT_ELECTIVE_GROUPS: Record<Track, Record<ElectiveKey, string[]>> = {
 const GENERAL_ELECTIVE_KEY = "全学共通選択";
 const PROFESSIONAL_ELECTIVE_KEY = "専門選択";
 
+/**
+ * シラバス上の科目名を履修ガイドの科目名と突き合わせるための候補名を返す。
+ * シラバスの科目名には履修ガイドの科目名に無い付加情報が付くことがある:
+ *   - ゼミナール等の担当教員名:「ゼミナールⅡ（田中）」→「ゼミナールⅡ」
+ *   - クラス分けの組:「経済学Ⅰａ」「数学Ⅰｂ」→「経済学Ⅰ」「数学Ⅰ」
+ * 元の名前を先頭に、付加情報を外した名前を後ろに並べて返す（完全一致を最優先）。
+ * ※「民法Ⅰ（物権法）」のように括弧まで含めて正式名称の科目は、履修ガイド側の
+ * リストに括弧付きで載っているため、先頭の完全一致で先にヒットする。
+ */
+export function courseNameMatchCandidates(name: string): string[] {
+  const candidates = [name];
+  const withoutParens = name.replace(/[（(][^（）()]*[）)]\s*$/, "").trim();
+  if (withoutParens && withoutParens !== name) candidates.push(withoutParens);
+  for (const base of [...candidates]) {
+    const withoutSection = base.replace(/[ａｂａ-ｚab]$/, "").trim();
+    if (withoutSection && withoutSection !== base && !candidates.includes(withoutSection)) {
+      candidates.push(withoutSection);
+    }
+  }
+  return candidates;
+}
+
+function matchNamesInclude(matchNames: string[] | undefined, courseName: string): boolean {
+  if (!matchNames) return false;
+  return courseNameMatchCandidates(courseName).some((candidate) => matchNames.includes(candidate));
+}
+
 function electiveRequiredCategories(track: Track, entryYear: number): RequirementCategory[] {
   const groups = isLegacyCurriculum(entryYear) ? LEGACY_ELECTIVE_GROUPS[track] : CURRENT_ELECTIVE_GROUPS[track];
   return ELECTIVE_KEYS.map((k) => ({
@@ -286,7 +313,9 @@ export function buildGuideFallbackCourses(
   entryYear: number,
   existingCourses: Course[]
 ): Course[] {
-  const existingNames = new Set(existingCourses.map((c) => c.name));
+  // 「ゼミナールⅡ（田中）」等が既にあれば履修ガイド名「ゼミナールⅡ」の簡易データは
+  // 生成しない（実データと突き合わせられる候補名をすべて既存扱いにする）
+  const existingNames = new Set(existingCourses.flatMap((c) => courseNameMatchCandidates(c.name)));
   const era = isLegacyCurriculum(entryYear) ? "legacy" : "current";
   const seen = new Set<string>();
   const result: Course[] = [];
@@ -366,15 +395,17 @@ export function classifyCourse(course: Course, requirementSet: GraduationRequire
     if (req) return req;
   }
 
+  // 履修ガイド名との突き合わせは、担当教員名（ゼミナールⅡ（田中））やクラス組
+  // （経済学Ⅰａ）を外した候補名でも行う（courseNameMatchCandidates参照）。
   const requiredGeneral = requirementSet.categories.find((c) => c.key === "全学共通必修");
-  if (requiredGeneral?.matchNames?.includes(course.name)) return requiredGeneral;
+  if (matchNamesInclude(requiredGeneral?.matchNames, course.name)) return requiredGeneral!;
   const requiredProfessional = requirementSet.categories.find((c) => c.key === "専門必修");
-  if (requiredProfessional?.matchNames?.includes(course.name)) return requiredProfessional;
+  if (matchNamesInclude(requiredProfessional?.matchNames, course.name)) return requiredProfessional!;
   const electiveRequiredLanguage = requirementSet.categories.find((c) => c.key === "全学共通選択必修");
-  if (electiveRequiredLanguage?.matchNames?.includes(course.name)) return electiveRequiredLanguage;
+  if (matchNamesInclude(electiveRequiredLanguage?.matchNames, course.name)) return electiveRequiredLanguage!;
 
   for (const cat of requirementSet.categories) {
-    if (cat.matchNames?.includes(course.name) && cat.key.startsWith("専門選択必修")) return cat;
+    if (cat.key.startsWith("専門選択必修") && matchNamesInclude(cat.matchNames, course.name)) return cat;
   }
 
   return (

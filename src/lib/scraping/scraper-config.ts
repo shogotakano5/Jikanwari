@@ -189,6 +189,8 @@ export type ScrapedCourse = {
   syllabusUrl?: string;
   rawText?: string;
   detail?: Record<string, string>;
+  /** 学年指定検索（grade=N）でヒットした場合の検索学年。配当学年の補完に使う */
+  sourceGrade?: number;
 };
 
 export type StudentGuideLink = {
