@@ -36,7 +36,8 @@ export default function SettingsPage() {
   );
 
   async function handleSave() {
-    await updateSettings(form);
+    // 設定画面から保存した場合も初回オンボーディングは完了扱いにする
+    await updateSettings({ ...form, onboardingCompleted: true });
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
 

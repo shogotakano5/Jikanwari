@@ -194,20 +194,38 @@ const PROFESSIONAL_ELECTIVE_KEY = "専門選択";
  */
 export function courseNameMatchCandidates(name: string): string[] {
   const candidates = [name];
-  const withoutParens = name.replace(/[（(][^（）()]*[）)]\s*$/, "").trim();
-  if (withoutParens && withoutParens !== name) candidates.push(withoutParens);
-  for (const base of [...candidates]) {
-    const withoutSection = base.replace(/[ａｂａ-ｚab]$/, "").trim();
-    if (withoutSection && withoutSection !== base && !candidates.includes(withoutSection)) {
-      candidates.push(withoutSection);
-    }
-  }
+  const push = (candidate: string) => {
+    const trimmed = candidate.trim();
+    if (trimmed && !candidates.includes(trimmed)) candidates.push(trimmed);
+  };
+  // 担当教員名: 「ゼミナールⅡ（田中）」→「ゼミナールⅡ」
+  push(name.replace(/[（(][^（）()]*[）)]\s*$/, ""));
+  // クラス番号+副題: 「英語Ⅰａ①②ﾘｽﾆﾝｸﾞ&ﾘｰﾃﾞｨﾝｸﾞ」「中国語Ⅰ①②」→「英語Ⅰａ」「中国語Ⅰ」
+  for (const base of [...candidates]) push(base.replace(/[①-⑳][\s\S]*$/, ""));
+  // クラス分けの組: 「経済学Ⅰａ」「数学Ⅰｂ」→「経済学Ⅰ」「数学Ⅰ」
+  for (const base of [...candidates]) push(base.replace(/[ａ-ｚa-z]$/, ""));
   return candidates;
 }
 
 function matchNamesInclude(matchNames: string[] | undefined, courseName: string): boolean {
   if (!matchNames) return false;
   return courseNameMatchCandidates(courseName).some((candidate) => matchNames.includes(candidate));
+}
+
+/**
+ * 科目が履修ガイドのどの科目名としてマッチしたかを返す（マッチしなければundefined）。
+ * 「英語Ⅰａ」「英語Ⅰｂ」のようなクラス分けされた複数の開講科目は、いずれも
+ * 履修ガイド上は同一の「英語Ⅰ」1科目なので、同じ値が返る。必修の自動配置で
+ * 同一ガイド科目のクラス違いを重複配置しないための判定に使う。
+ */
+export function matchedGuideName(course: Course, requirementSet: GraduationRequirementSet): string | undefined {
+  for (const cat of requirementSet.categories) {
+    if (!cat.matchNames) continue;
+    for (const candidate of courseNameMatchCandidates(course.name)) {
+      if (cat.matchNames.includes(candidate)) return candidate;
+    }
+  }
+  return undefined;
 }
 
 function electiveRequiredCategories(track: Track, entryYear: number): RequirementCategory[] {

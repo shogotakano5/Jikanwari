@@ -5,7 +5,7 @@ import type { CourseStatus, Grade, Period, Term, Weekday } from "@/types";
 import { useAppData, timetableSlotId } from "@/contexts/AppDataContext";
 import { findRequirementSet, classifyCourse } from "@/lib/graduation-requirements";
 import { getSubjectGroup } from "@/lib/subject-group";
-import { gradeMatchesCourse, termMatchesSemester, courseMatchesSyllabusYear } from "@/lib/timetable";
+import { gradeMatchesCourse, termMatchesSemester, courseMatchesSyllabusYear, courseOccupiesSlot, assignCourseSlots } from "@/lib/timetable";
 import CourseCard from "./CourseCard";
 import ManualCourseDialog from "./ManualCourseDialog";
 
@@ -50,8 +50,8 @@ export default function CellDetailModal({ grade, term, day, period, syllabusYear
     () =>
       courses.filter(
         (c) =>
-          c.day === day &&
-          c.period === period &&
+          // 週2コマの科目（外国語等）はどちらのコマのセルからも候補に出す
+          courseOccupiesSlot(c, day, period) &&
           c.id !== assignedCourse?.id &&
           gradeMatchesCourse(c, grade) &&
           termMatchesSemester(c.semester, term) &&
@@ -63,8 +63,11 @@ export default function CellDetailModal({ grade, term, day, period, syllabusYear
   const favoriteIds = useMemo(() => new Set(favorites.map((f) => f.courseId)), [favorites]);
 
   const runAssign = async (courseId: string) => {
+    const course = courses.find((c) => c.id === courseId);
+    if (!course) return;
     setBusy(true);
-    await assignToTimetable(grade, term, day, period, courseId);
+    // 週2コマの科目は全コマを配置する（タップされたセルは上書き、他コマは空きのみ）
+    await assignCourseSlots(course, grade, term, timetable, assignToTimetable, { day, period });
     setBusy(false);
   };
 
@@ -103,7 +106,16 @@ export default function CellDetailModal({ grade, term, day, period, syllabusYear
               isFavorite={favoriteIds.has(assignedCourse.id)}
               onRemove={async () => {
                 setBusy(true);
-                await removeFromTimetable(grade, term, day, period);
+                // 週2コマの科目は全コマ削除する（この学年・学期で同じ科目が入っている他のセルも含む）
+                const slotsToRemove = timetable.filter(
+                  (t) => t.grade === grade && t.term === term && t.courseId === assignedCourse.id
+                );
+                for (const entry of slotsToRemove) {
+                  await removeFromTimetable(grade, term, entry.day, entry.period);
+                }
+                if (!slotsToRemove.some((t) => t.day === day && t.period === period)) {
+                  await removeFromTimetable(grade, term, day, period);
+                }
                 setBusy(false);
                 onClose();
               }}

@@ -56,6 +56,12 @@ export interface Course {
   /** 集中講義など、固定の曜日・時限を持たない科目は未設定になる */
   day?: Weekday;
   period?: Period;
+  /**
+   * 週2コマ以上ある科目（外国語科目など）の全コマ。1つ目のコマはday/periodと同じ値。
+   * 週1コマの科目では未設定（day/periodのみ）。時間割への配置・候補表示・自動配置は
+   * courseSlots()（src/lib/timetable.ts）経由で全コマを扱う。
+   */
+  meetings?: { day: Weekday; period: Period }[];
   room?: string;
   overview: string;
   goals?: string; // 到達目標
@@ -134,6 +140,8 @@ export interface Settings {
   lastSyllabusSyncNote?: string;
   loadedSyllabusYears?: number[]; // Track which years' syllabus data have been imported
   selectedCourse?: Track; // 2年次以降に所属するコース（未選択の場合はeconomicsを既定値として扱う）
+  /** 初回起動時の入学年度・コース確認ダイアログを完了したか */
+  onboardingCompleted?: boolean;
 }
 
 export interface FavoriteEntry {

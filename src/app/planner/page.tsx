@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useAppData } from "@/contexts/AppDataContext";
 import { findRequirementSet, judgeGraduation, classifyCourse } from "@/lib/graduation-requirements";
-import { autoPlaceRequiredCourses, gradeMatchesCourse, termMatchesSemester } from "@/lib/timetable";
+import { autoPlaceRequiredCourses, gradeMatchesCourse, termMatchesSemester, assignCourseSlots, currentGradeFor, currentTermFor } from "@/lib/timetable";
 import { getSubjectGroup } from "@/lib/subject-group";
 import { GRADES, TERMS, type Grade, type Term } from "@/types";
 import CourseCard from "@/components/CourseCard";
@@ -12,8 +12,13 @@ import ElectiveRequiredDialog from "@/components/ElectiveRequiredDialog";
 export default function PlannerPage() {
   const { courses, timetable, completed, courseById, favorites, statusByCourseId, assignToTimetable, toggleFavorite, settings } =
     useAppData();
-  const [grade, setGrade] = useState<Grade>(1);
-  const [term, setTerm] = useState<Term>("前期");
+  // 入学年度から現在の学年・今の学期を初期表示にする（ユーザーが切り替えたらそちらを優先）
+  const [gradeOverride, setGradeOverride] = useState<Grade | null>(null);
+  const [termOverride, setTermOverride] = useState<Term | null>(null);
+  const grade = gradeOverride ?? currentGradeFor(settings.entryYear);
+  const term = termOverride ?? currentTermFor();
+  const setGrade = setGradeOverride;
+  const setTerm = setTermOverride;
   const [activeCategoryKey, setActiveCategoryKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [showElectiveDialog, setShowElectiveDialog] = useState(false);
@@ -50,9 +55,11 @@ export default function PlannerPage() {
     setMessage(`${grade}年 ${term} の必修を${placed}件配置しました。${skipped > 0 ? `${skipped}件は同じ時間に別の授業が既にあるため保留です。` : ""}`);
   }
 
-  async function assignChoice(courseId: string, day: (typeof courses)[number]["day"], period: (typeof courses)[number]["period"]) {
-    if (!day || !period) return;
-    await assignToTimetable(grade, term, day, period, courseId);
+  async function assignChoice(courseId: string) {
+    const course = courses.find((c) => c.id === courseId);
+    if (!course) return;
+    // 週2コマの科目（外国語等）は全コマを時間割へ配置する
+    await assignCourseSlots(course, grade, term, timetable, assignToTimetable);
     setMessage(null);
   }
 
@@ -143,7 +150,7 @@ export default function PlannerPage() {
                   subjectGroup={getSubjectGroup(c, settings.entryYear)}
                   status={statusByCourseId.get(c.id)}
                   isFavorite={favoriteIds.has(c.id)}
-                  onAssign={() => assignChoice(c.id, c.day, c.period)}
+                  onAssign={() => assignChoice(c.id)}
                   onToggleFavorite={() => toggleFavorite(c.id)}
                   compact
                 />

@@ -61,6 +61,27 @@ function parseDay(raw: string): Weekday | undefined {
 }
 
 /**
+ * 「開講期・曜日・時限」フィールド（例: 「前期 水曜日 ３時限 短）224\n前期 木曜日 ３時限 大）201」）
+ * から週あたりの全コマを抽出する。外国語科目（英語Ⅰ①②等）は週2コマあり、
+ * day/periodの単一フィールドには1コマ目しか入らないため、ここで全コマを復元する。
+ */
+function parseMeetings(scheduleText: string | undefined): { day: Weekday; period: Period }[] {
+  if (!scheduleText) return [];
+  const meetings: { day: Weekday; period: Period }[] = [];
+  const re = /([月火水木金土])曜日?\s*([０-９0-9])\s*時限/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(scheduleText)) !== null) {
+    const day = m[1] as Weekday;
+    const period = zenkakuDigitsToNumber(m[2]) as Period | undefined;
+    if (!period) continue;
+    if (!meetings.some((slot) => slot.day === day && slot.period === period)) {
+      meetings.push({ day, period });
+    }
+  }
+  return meetings;
+}
+
+/**
  * 配当学年をパースする。「配当学年」フィールドが空の科目は、元データ収集時の
  * 検索条件（raw["取得元検索条件"] = "grade1"〜"grade4"）から配当学年を復元する
  * （学年指定で検索してヒットした科目はその学年の配当科目）。曜日検索（"day1"等）
@@ -123,6 +144,9 @@ function nonEmpty(value: string | undefined): string | undefined {
 
 export function mapRawCourseToCourse(raw: RawCourseRecord): Course {
   const rawFields = raw.raw ?? {};
+  const day = parseDay(sanitizeInlineText(raw.day));
+  const period = zenkakuDigitsToNumber(sanitizeInlineText(raw.period)) as Period | undefined;
+  const meetings = parseMeetings(rawFields["開講期・曜日・時限"]);
   return {
     id: raw.id,
     name: sanitizeInlineText(raw.name) || raw.id,
@@ -133,8 +157,10 @@ export function mapRawCourseToCourse(raw: RawCourseRecord): Course {
     targetYears: parseTargetYears(rawFields["配当学年"], rawFields["取得元検索条件"]),
     syllabusYear: raw.year || undefined,
     semester: parseSemester(sanitizeInlineText(raw.semester)),
-    day: parseDay(sanitizeInlineText(raw.day)),
-    period: zenkakuDigitsToNumber(sanitizeInlineText(raw.period)) as Period | undefined,
+    day: day ?? meetings[0]?.day,
+    period: period ?? meetings[0]?.period,
+    // 週2コマ以上（外国語科目等）の場合のみ全コマを保持する
+    meetings: meetings.length >= 2 ? meetings : undefined,
     overview: sanitizeScrapedText(raw.description),
     goals: nonEmpty(sanitizeScrapedText(raw.goals)),
     prerequisites: nonEmpty(sanitizeScrapedText(raw.prerequisites)),

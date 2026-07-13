@@ -4,6 +4,7 @@ import "./globals.css";
 import { AppDataProvider } from "@/contexts/AppDataContext";
 import BottomNav from "@/components/BottomNav";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
+import OnboardingDialog from "@/components/OnboardingDialog";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -51,6 +52,7 @@ export default function RootLayout({
           <ServiceWorkerRegister />
           <main className="flex-1 pb-20 sm:pb-6 sm:pl-56">{children}</main>
           <BottomNav />
+          <OnboardingDialog />
         </AppDataProvider>
       </body>
     </html>

@@ -40,9 +40,30 @@ const DAY_MAP: Record<string, Weekday> = { 月: "月", 火: "火", 水: "水", �
 
 function parseDayPeriod(text: string | undefined): { day: Weekday; period: number } | null {
   if (!text) return null;
-  const m = text.match(/([月火水木金土])\s*曜?日?\s*[\s　]*(\d)\s*時限?/);
+  const m = text.match(/([月火水木金土])\s*曜?日?\s*[\s　]*([０-９\d])\s*時限?/);
   if (!m) return null;
-  return { day: DAY_MAP[m[1]], period: Number(m[2]) };
+  const period = Number(m[2].replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0)));
+  return { day: DAY_MAP[m[1]], period };
+}
+
+/**
+ * 「開講期・曜日・時限」テキストから週あたりの全コマを抽出する。
+ * 外国語科目のように週2コマの科目は「前期 水曜日 ３時限 …\n前期 木曜日 ３時限 …」の
+ * 形で2コマ分が記載されるため、すべて拾う（parseDayPeriodは1コマ目のみ）。
+ */
+function parseMeetings(text: string | undefined): { day: Weekday; period: Period }[] {
+  if (!text) return [];
+  const meetings: { day: Weekday; period: Period }[] = [];
+  const re = /([月火水木金土])\s*曜?日?\s*[\s　]*([０-９\d])\s*時限/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const day = DAY_MAP[m[1]];
+    const period = Number(m[2].replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))) as Period;
+    if (day && period >= 1 && period <= 7 && !meetings.some((slot) => slot.day === day && slot.period === period)) {
+      meetings.push({ day, period });
+    }
+  }
+  return meetings;
 }
 
 function parseEvaluation(text: string | undefined): EvaluationItem[] {
@@ -90,6 +111,7 @@ export function mapScrapedCourseToCourse(scraped: ScrapedCourse): Course {
   const detail = scraped.detail;
   const dayPeriod =
     parseDayPeriod(detail?.["開講期・曜日・時限"]) ?? parseDayPeriod(scraped.rawText) ?? parseDayPeriod(`${scraped.day ?? ""}${scraped.period ?? ""}`);
+  const meetings = parseMeetings(detail?.["開講期・曜日・時限"]);
   const evaluationText = detail?.["評価方法・基準"] ?? scraped.rawText;
 
   return {
@@ -104,6 +126,8 @@ export function mapScrapedCourseToCourse(scraped: ScrapedCourse): Course {
     semester: parseSemester(detail, scraped.rawText),
     day: dayPeriod?.day,
     period: dayPeriod?.period as Period | undefined,
+    // 週2コマ以上（外国語科目等）の場合のみ全コマを保持する
+    meetings: meetings.length >= 2 ? meetings : undefined,
     overview: detail?.["授業の概要"] ?? "",
     goals: nonEmpty(detail?.["到達目標"]),
     prerequisites: nonEmpty(detail?.["履修条件"]),

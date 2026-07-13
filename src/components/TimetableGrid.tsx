@@ -3,7 +3,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { useAppData } from "@/contexts/AppDataContext";
 import { PERIODS, WEEKDAYS, TERMS, GRADES, type Grade, type Period, type Term, type Weekday } from "@/types";
-import { autoPlaceRequiredCourses, expectedSyllabusYear } from "@/lib/timetable";
+import { autoPlaceRequiredCourses, expectedSyllabusYear, currentGradeFor, currentTermFor } from "@/lib/timetable";
 import { findRequirementSet } from "@/lib/graduation-requirements";
 import CellDetailModal from "./CellDetailModal";
 
@@ -11,8 +11,14 @@ const DISPLAY_DAYS: Weekday[] = WEEKDAYS; // 月〜土
 
 export default function TimetableGrid() {
   const { courses, timetable, ready, assignToTimetable, settings } = useAppData();
-  const [grade, setGrade] = useState<Grade>(1);
-  const [term, setTerm] = useState<Term>("前期");
+  // 入学年度から「今何年生か」を判定し、現在の学年・学期を初期表示にする
+  // （ユーザーがセレクトで切り替えたらそちらを優先する）
+  const [gradeOverride, setGradeOverride] = useState<Grade | null>(null);
+  const [termOverride, setTermOverride] = useState<Term | null>(null);
+  const grade = gradeOverride ?? currentGradeFor(settings.entryYear);
+  const term = termOverride ?? currentTermFor();
+  const setGrade = setGradeOverride;
+  const setTerm = setTermOverride;
   const [selected, setSelected] = useState<{ day: Weekday; period: Period } | null>(null);
   const [autoPlaceMessage, setAutoPlaceMessage] = useState<string | null>(null);
 
